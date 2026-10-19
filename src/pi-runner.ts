@@ -11,7 +11,7 @@ interface RpcResponse<T = unknown> {
   error?: string;
 }
 
-interface PromptResponse {
+export interface PromptResponse {
   disposition: 'started' | 'queued' | 'handled';
 }
 
@@ -126,6 +126,10 @@ export class PiRpcRunner {
     return promise;
   }
 
+  isRunning(): boolean {
+    return this.running;
+  }
+
   async promptAndWait(message: string): Promise<string> {
     if (this.config.mock) {
       return `mock pi reply: ${message.slice(0, 120)}`;
@@ -160,6 +164,11 @@ export class PiRpcRunner {
         reject,
       });
     });
+  }
+
+  steer(message: string): Promise<PromptResponse> {
+    if (this.config.mock) return Promise.resolve({ disposition: 'queued' });
+    return this.command<PromptResponse>('steer', { message });
   }
 
   getState(): Promise<unknown> {
@@ -199,6 +208,7 @@ export class PiRpcRunner {
       this.lastAssistantText = `mock pi reply: ${String(fields.message).slice(0, 120)}`;
       return { disposition: 'started' };
     }
+    if (type === 'steer') return { disposition: 'queued' };
     return {};
   }
 

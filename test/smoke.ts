@@ -73,6 +73,7 @@ const daemon = new PersonalDaemon(config);
 await daemon.enqueue(normalizeInbound({ type: 'message', id: 'evt-smoke', chatId: 'chat-smoke', text: 'hello smoke' }, 'test'));
 assert.equal(fs.existsSync(outbox), false);
 await daemon.enqueue(v2);
+await new Promise(resolve => setTimeout(resolve, 10_100));
 await daemon.enqueue(v2);
 let lines = fs.readFileSync(outbox, 'utf8').trim().split('\n');
 assert.equal(lines.length, 2);
@@ -93,6 +94,81 @@ assert.equal(currentContext.contextUsageSource, 'pi-rpc context usage unavailabl
 assert.doesNotMatch(currentContext.contextUsage, /\b\d+\/\d+ tokens\b/);
 assert.doesNotMatch(currentContext.contextUsage, /\b(messages|pending|model|Pi session)\b/);
 assert.equal(JSON.parse(fs.readFileSync(bindingFile, 'utf8')).chatId, 'oc-test');
+
+const steerOutbox = path.join(tmp, 'steer-outbox.jsonl');
+const steerContextFile = path.join(tmp, 'steer-context.json');
+const steerConfig: AppConfig = {
+  ...config,
+  sender: { type: 'mock', mockOutbox: steerOutbox },
+  runtime: { contextFile: steerContextFile, stateDir: path.join(tmp, 'steer-state') },
+};
+const steerDaemon = new PersonalDaemon(steerConfig);
+let running = false;
+let resolveFirst: (() => void) | undefined;
+const steers: string[] = [];
+Object.assign(steerDaemon['runner'], {
+  isRunning: () => running,
+  promptAndWait: async () => {
+    running = true;
+    await new Promise<void>(resolve => { resolveFirst = resolve; });
+    running = false;
+    return '';
+  },
+  steer: async (message: string) => {
+    steers.push(message);
+    return { disposition: 'queued' as const };
+  },
+  getContextUsage: async () => ({ text: 'Context usage unavailable', source: 'test' }),
+});
+const firstActive = normalizeInbound({
+  schema: '2.0',
+  header: { event_id: 'evt-active-1', event_type: 'im.message.receive_v1', token: 'verify-token' },
+  event: {
+    sender: { sender_id: { open_id: 'ou-active' } },
+    message: { message_id: 'om-active-1', chat_id: 'oc-active', message_type: 'text', content: JSON.stringify({ text: 'first active' }) },
+  },
+}, 'test-feishu');
+const secondActive = normalizeInbound({
+  schema: '2.0',
+  header: { event_id: 'evt-active-2', event_type: 'im.message.receive_v1', token: 'verify-token' },
+  event: {
+    sender: { sender_id: { open_id: 'ou-active' } },
+    message: { message_id: 'om-active-2', chat_id: 'oc-active', message_type: 'text', content: JSON.stringify({ text: 'second active' }) },
+  },
+}, 'test-feishu');
+const thirdActive = normalizeInbound({
+  schema: '2.0',
+  header: { event_id: 'evt-active-3', event_type: 'im.message.receive_v1', token: 'verify-token' },
+  event: {
+    sender: { sender_id: { open_id: 'ou-active' } },
+    message: { message_id: 'om-active-3', chat_id: 'oc-active', message_type: 'text', content: JSON.stringify({ text: 'third active' }) },
+  },
+}, 'test-feishu');
+steerDaemon.enqueue(firstActive);
+await new Promise(resolve => setTimeout(resolve, 10_100));
+assert.equal(running, true);
+steerDaemon.enqueue(secondActive);
+steerDaemon.enqueue(thirdActive);
+await new Promise(resolve => setTimeout(resolve, 10_100));
+assert.equal(steers.length, 1);
+assert.match(steers[0], /Aggregated 2 Feishu inbound messages/);
+assert.match(steers[0], /event_id=evt-active-2/);
+assert.match(steers[0], /second active/);
+assert.match(steers[0], /event_id=evt-active-3/);
+assert.match(steers[0], /third active/);
+assert.equal(running, true);
+resolveFirst?.();
+await new Promise(resolve => setTimeout(resolve, 0));
+lines = fs.readFileSync(steerOutbox, 'utf8').trim().split('\n');
+assert.equal(lines.length, 6);
+assert.equal((JSON.parse(lines[1]) as { messageId: string; emojiType: string }).messageId, 'om-active-2');
+assert.equal((JSON.parse(lines[1]) as { messageId: string; emojiType: string }).emojiType, 'OK');
+assert.equal((JSON.parse(lines[2]) as { messageId: string; emojiType: string }).messageId, 'om-active-3');
+assert.equal((JSON.parse(lines[2]) as { messageId: string; emojiType: string }).emojiType, 'OK');
+assert.equal((JSON.parse(lines[3]) as { messageId: string; emojiType: string }).messageId, 'om-active-2');
+assert.equal((JSON.parse(lines[3]) as { messageId: string; emojiType: string }).emojiType, 'DONE');
+assert.equal((JSON.parse(lines[4]) as { messageId: string; emojiType: string }).messageId, 'om-active-3');
+assert.equal((JSON.parse(lines[4]) as { messageId: string; emojiType: string }).emojiType, 'DONE');
 
 const bindStatus = spawnSync('node', ['dist/cli.js', 'bind', 'status'], {
   cwd: path.resolve(import.meta.dirname, '..'),
