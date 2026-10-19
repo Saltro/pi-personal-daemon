@@ -139,7 +139,7 @@ pi-personal send '**hello** from markdown'
 printf 'hello from `stdin`' | pi-personal send --stdin
 ```
 
-The text or stdin body is placed in a Feishu card JSON 2.0 `markdown` element so inline code, lists, and other card markdown features render in the client. The send command appends a small grey footer from the runtime context file with only context occupancy, such as `Context 37%`; agents keep the message body focused on reply content.
+The text or stdin body is placed in a Feishu card JSON 2.0 `markdown` element so inline code, lists, and other card markdown features render in the client. The card uses the v2 envelope (`schema: "2.0"`, `config.update_multi`, `config.width_mode`, and vertical `body.elements`), matching Feishu's inline-code support and botmux's reply-card shape. The send command appends a small grey footer from the runtime context file with only context occupancy, such as `Context 37%`; agents keep the message body focused on reply content.
 
 Session-control MVP:
 
@@ -196,7 +196,7 @@ To use real Feishu text sending, set `sender.type` to `feishu` and configure cre
 }
 ```
 
-`FeishuSender` fetches `/open-apis/auth/v3/tenant_access_token/internal`, caches the tenant token, and sends interactive cards through `/open-apis/im/v1/messages?receive_id_type=chat_id` with payload shape `{ receive_id, msg_type: "interactive", content: JSON.stringify({ schema: "2.0", config: { wide_screen_mode: true }, body: { elements: [{ tag: "markdown", content: markdownBody }, { tag: "hr" }, { tag: "markdown", content: greyFooter }] } }) }`. The bound Feishu chat id is stored at `runtime.stateDir/feishu-chat-binding.json` or `~/.cache/pi-personal-daemon/feishu-chat-binding.json`.
+`FeishuSender` fetches `/open-apis/auth/v3/tenant_access_token/internal`, caches the tenant token, and sends interactive cards through `/open-apis/im/v1/messages?receive_id_type=chat_id` with payload shape `{ receive_id, msg_type: "interactive", content: JSON.stringify({ schema: "2.0", config: { update_multi: true, width_mode: "fill" }, body: { direction: "vertical", elements: [{ tag: "markdown", content: markdownBody }, { tag: "hr" }, { tag: "markdown", content: greyFooter }] } }) }`. The bound Feishu chat id is stored at `runtime.stateDir/feishu-chat-binding.json` or `~/.cache/pi-personal-daemon/feishu-chat-binding.json`.
 
 Real deployment still needs:
 

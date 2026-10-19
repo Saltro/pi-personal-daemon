@@ -148,8 +148,8 @@ function buildReplyCard(reply: OutboundReply): Record<string, unknown> {
   }
   return {
     schema: '2.0',
-    config: { wide_screen_mode: true },
-    body: { elements },
+    config: { update_multi: true, width_mode: 'fill' },
+    body: { direction: 'vertical', elements },
   };
 }
 

@@ -123,7 +123,7 @@ const sendMain = spawnSync('node', ['dist/cli.js', 'send', '--stdin'], {
 assert.equal(sendMain.status, 0, sendMain.stderr);
 lines = fs.readFileSync(outbox, 'utf8').trim().split('\n');
 assert.equal(lines.length, 3);
-let sent = JSON.parse(lines[2]) as { chatId: string; inReplyTo: string; text: string; contextFooter: string; msgType: string; card: { schema?: string; elements?: Array<{ tag: string; content?: string; text?: { tag: string; content: string } }>; body?: { elements: Array<{ tag: string; content?: string; text?: { tag: string; content: string } }> } } };
+let sent = JSON.parse(lines[2]) as { chatId: string; inReplyTo: string; text: string; contextFooter: string; msgType: string; card: { schema?: string; config?: { update_multi?: boolean; width_mode?: string }; body?: { direction?: string; elements: Array<{ tag: string; content?: string; text?: { tag: string; content: string } }> } } };
 assert.equal(sent.chatId, 'oc-test');
 assert.equal(sent.inReplyTo, 'return-callback-smoke');
 assert.equal(sent.text, '**hello** from `pi-personal send`\n- list item with `inline code`');
@@ -132,6 +132,9 @@ assert.doesNotMatch(sent.contextFooter, /\b\d+\/\d+ tokens\b/);
 assert.doesNotMatch(sent.contextFooter, /\b(messages|pending|model|Pi session)\b/);
 assert.equal(sent.msgType, 'interactive');
 assert.equal(sent.card.schema, '2.0');
+assert.equal(sent.card.config?.update_multi, true);
+assert.equal(sent.card.config?.width_mode, 'fill');
+assert.equal(sent.card.body?.direction, 'vertical');
 const sentElements = sent.card.body?.elements || [];
 assert.equal(sentElements[0].tag, 'markdown');
 assert.equal(sentElements[0].content, '**hello** from `pi-personal send`\n- list item with `inline code`');
