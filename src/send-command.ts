@@ -35,6 +35,7 @@ export async function runSendCli(args: string[], command = 'pi-personal send'): 
     chatId: binding.chatId,
     inReplyTo: context?.eventId || 'manual',
     text,
+    contextFooter: context?.contextUsage,
   });
   if (context) {
     const updated = recordContextSend(config);

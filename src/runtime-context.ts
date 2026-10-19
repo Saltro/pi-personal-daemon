@@ -41,3 +41,11 @@ export function recordContextSend(config: AppConfig): RuntimeContext {
   fs.writeFileSync(contextFile(config), JSON.stringify(context, null, 2));
   return context;
 }
+
+export function recordContextUsage(config: AppConfig, usage: { text: string; source: string }): RuntimeContext {
+  const context = readCurrentContext(config);
+  context.contextUsage = usage.text;
+  context.contextUsageSource = usage.source;
+  fs.writeFileSync(contextFile(config), JSON.stringify(context, null, 2));
+  return context;
+}

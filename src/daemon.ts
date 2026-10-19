@@ -3,7 +3,7 @@ import { ensureFeishuChatBinding, readFeishuChatBinding } from './feishu-binding
 import { drainParentNotifications, noticeToInbound } from './session-callbacks.js';
 import { PiRpcRunner } from './pi-runner.js';
 import { createSender } from './sender.js';
-import { readCurrentContext, writeCurrentContext } from './runtime-context.js';
+import { readCurrentContext, recordContextUsage, writeCurrentContext } from './runtime-context.js';
 import { startHttpReceiver, startStdinReceiver } from './receivers.js';
 import { WakeupScheduler } from './scheduler.js';
 import { startFeishuWsReceiver } from './feishu-ws.js';
@@ -70,13 +70,25 @@ export class PersonalDaemon {
     this.bindFeishuChat(event);
     await this.addReaction(event, PROCESSING_REACTION, 'processing');
     writeCurrentContext(this.config, event);
+    await this.refreshContextUsage(event.id);
     const prompt = toPiPrompt(event);
     console.error(`[daemon] prompt start event=${event.id}`);
     await this.runner.promptAndWait(prompt);
+    await this.refreshContextUsage(event.id);
     const context = readCurrentContext(this.config);
     console.error(`[daemon] prompt done event=${event.id} send_count=${context.sendCount || 0}`);
     if (!context.sendCount) console.error(`[daemon] reply not sent event=${event.id} reason=agent_cli_not_called`);
     await this.addReaction(event, COMPLETION_REACTION, 'completion');
+  }
+
+  private async refreshContextUsage(eventId: string): Promise<void> {
+    try {
+      const usage = await this.runner.getContextUsage();
+      recordContextUsage(this.config, usage);
+      console.error(`[daemon] context usage event=${eventId} value=${JSON.stringify(usage.text)} source=${usage.source}`);
+    } catch (error) {
+      console.error(`[daemon] context usage warning event=${eventId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private bindFeishuChat(event: InboundEvent): void {

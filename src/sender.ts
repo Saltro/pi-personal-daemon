@@ -24,9 +24,10 @@ export class MockSender implements Sender {
   }
 
   async send(reply: OutboundReply): Promise<{ ok: true; mock: true }> {
-    const record = { ...reply, sentAt: new Date().toISOString(), transport: 'mock' };
+    const card = buildReplyCard(reply);
+    const record = { ...reply, card, msgType: 'interactive', sentAt: new Date().toISOString(), transport: 'mock' };
     fs.appendFileSync(this.outbox, JSON.stringify(record) + '\n');
-    console.error(`[mock-send] chat=${reply.chatId} text=${JSON.stringify(reply.text)}`);
+    console.error(`[mock-send] chat=${reply.chatId} markdown=${JSON.stringify(reply.text)} footer=${JSON.stringify(reply.contextFooter || '')}`);
     return { ok: true, mock: true };
   }
 
@@ -62,8 +63,8 @@ export class FeishuSender implements Sender {
       },
       body: JSON.stringify({
         receive_id: reply.chatId,
-        msg_type: 'text',
-        content: JSON.stringify({ text: reply.text }),
+        msg_type: 'interactive',
+        content: JSON.stringify(buildReplyCard(reply)),
       }),
     });
     const body = (await response.json().catch(() => ({}))) as FeishuApiResponse;
@@ -132,6 +133,28 @@ export class FeishuSender implements Sender {
 function isTokenError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /token|99991663|99991664|99991665|99991668/i.test(message);
+}
+
+function buildReplyCard(reply: OutboundReply): Record<string, unknown> {
+  const elements: Array<Record<string, unknown>> = [
+    { tag: 'markdown', content: reply.text },
+  ];
+  if (reply.contextFooter) {
+    elements.push({ tag: 'hr' });
+    elements.push({
+      tag: 'markdown',
+      content: `<font color=\"grey\"><font size=\"small\">${escapeLarkMd(reply.contextFooter)}</font></font>`,
+    });
+  }
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    body: { elements },
+  };
+}
+
+function escapeLarkMd(text: string): string {
+  return text.replace(/[<&>]/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[char] || char);
 }
 
 export function createSender(config: AppConfig): Sender {

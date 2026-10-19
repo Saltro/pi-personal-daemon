@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { PersonalDaemon } from '../src/daemon.js';
 import { normalizeInbound } from '../src/events.js';
+import { extractContextUsage } from '../src/pi-runner.js';
 import { isValidFeishuToken } from '../src/receivers.js';
 import type { AppConfig } from '../src/types.js';
 
@@ -51,6 +52,22 @@ assert.equal(v2.userId, 'ou-test');
 assert.equal(v2.text, 'hello v2');
 assert.equal(isValidFeishuToken({ header: { token: 'verify-token' } }, 'verify-token'), true);
 assert.equal(isValidFeishuToken({ header: { token: 'bad' } }, 'verify-token'), false);
+assert.deepEqual(
+  extractContextUsage({ messageCount: 2, pendingMessageCount: 0, model: { maxTokens: 16384, contextWindow: 1000000 } }, { messages: [] }, 'smoke'),
+  { text: 'Context usage unavailable', source: 'pi-rpc context usage unavailable' },
+);
+assert.deepEqual(
+  extractContextUsage({ model: { contextWindow: 1000000, maxTokens: 16384 } }, { messages: [{ role: 'assistant', usage: { input: 60000, cacheRead: 2000, output: 100 } }] }, 'smoke'),
+  { text: 'Context 6%', source: 'pi-rpc get_messages latest assistant usage and model contextWindow' },
+);
+assert.deepEqual(
+  extractContextUsage({ model: { contextWindow: 1000000 } }, { messages: [{ role: 'assistant', usage: { totalTokens: 60000 } }] }, 'smoke'),
+  { text: 'Context usage unavailable', source: 'pi-rpc context usage unavailable' },
+);
+assert.deepEqual(
+  extractContextUsage({ context: { usedContextTokens: 60234, contextLimit: 163840 } }, { messages: [] }, 'smoke'),
+  { text: 'Context 37%', source: 'pi-rpc get_state context/token usage fields' },
+);
 
 const daemon = new PersonalDaemon(config);
 await daemon.enqueue(normalizeInbound({ type: 'message', id: 'evt-smoke', chatId: 'chat-smoke', text: 'hello smoke' }, 'test'));
@@ -67,10 +84,14 @@ const completionReaction = JSON.parse(lines[1]) as { messageId: string; emojiTyp
 assert.equal(completionReaction.messageId, 'om-test');
 assert.equal(completionReaction.emojiType, 'DONE');
 assert.equal(completionReaction.transport, 'mock-reaction');
-const currentContext = JSON.parse(fs.readFileSync(contextFile, 'utf8')) as { chatId: string; eventId: string; sendCount: number };
+const currentContext = JSON.parse(fs.readFileSync(contextFile, 'utf8')) as { chatId: string; eventId: string; sendCount: number; contextUsage: string; contextUsageSource: string };
 assert.equal(currentContext.chatId, 'oc-test');
 assert.equal(currentContext.eventId, 'evt-v2');
 assert.equal(currentContext.sendCount, 0);
+assert.equal(currentContext.contextUsage, 'Context usage unavailable');
+assert.equal(currentContext.contextUsageSource, 'pi-rpc context usage unavailable');
+assert.doesNotMatch(currentContext.contextUsage, /\b\d+\/\d+ tokens\b/);
+assert.doesNotMatch(currentContext.contextUsage, /\b(messages|pending|model|Pi session)\b/);
 assert.equal(JSON.parse(fs.readFileSync(bindingFile, 'utf8')).chatId, 'oc-test');
 
 const bindStatus = spawnSync('node', ['dist/cli.js', 'bind', 'status'], {
@@ -96,16 +117,28 @@ assert.equal(JSON.parse(fs.readFileSync(bindingFile, 'utf8')).chatId, 'oc-test')
 const sendMain = spawnSync('node', ['dist/cli.js', 'send', '--stdin'], {
   cwd: path.resolve(import.meta.dirname, '..'),
   env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
-  input: 'hello from pi-personal send',
+  input: '**hello** from `pi-personal send`\n- list item with `inline code`',
   encoding: 'utf8',
 });
 assert.equal(sendMain.status, 0, sendMain.stderr);
 lines = fs.readFileSync(outbox, 'utf8').trim().split('\n');
 assert.equal(lines.length, 3);
-let sent = JSON.parse(lines[2]) as { chatId: string; inReplyTo: string; text: string };
+let sent = JSON.parse(lines[2]) as { chatId: string; inReplyTo: string; text: string; contextFooter: string; msgType: string; card: { schema?: string; elements?: Array<{ tag: string; content?: string; text?: { tag: string; content: string } }>; body?: { elements: Array<{ tag: string; content?: string; text?: { tag: string; content: string } }> } } };
 assert.equal(sent.chatId, 'oc-test');
 assert.equal(sent.inReplyTo, 'return-callback-smoke');
-assert.equal(sent.text, 'hello from pi-personal send');
+assert.equal(sent.text, '**hello** from `pi-personal send`\n- list item with `inline code`');
+assert.equal(sent.contextFooter, 'Context usage unavailable');
+assert.doesNotMatch(sent.contextFooter, /\b\d+\/\d+ tokens\b/);
+assert.doesNotMatch(sent.contextFooter, /\b(messages|pending|model|Pi session)\b/);
+assert.equal(sent.msgType, 'interactive');
+assert.equal(sent.card.schema, '2.0');
+const sentElements = sent.card.body?.elements || [];
+assert.equal(sentElements[0].tag, 'markdown');
+assert.equal(sentElements[0].content, '**hello** from `pi-personal send`\n- list item with `inline code`');
+assert.match(sentElements[0].content || '', /^\*\*hello\*\* from `pi-personal send`\n- list item with `inline code`$/);
+assert.equal(sentElements[1].tag, 'hr');
+assert.equal(sentElements[2].tag, 'markdown');
+assert.match(sentElements[2].content || '', /<font color="grey"><font size="small">Context usage unavailable<\/font><\/font>/);
 let sentContext = JSON.parse(fs.readFileSync(contextFile, 'utf8')) as { sendCount: number };
 assert.equal(sentContext.sendCount, 1);
 

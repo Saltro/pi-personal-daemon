@@ -76,6 +76,7 @@ export interface OutboundReply {
   chatId: string;
   inReplyTo: string;
   text: string;
+  contextFooter?: string;
 }
 
 export interface Sender {
@@ -93,4 +94,6 @@ export interface RuntimeContext {
   startedAt: string;
   sendCount: number;
   lastSentAt?: string;
+  contextUsage?: string;
+  contextUsageSource?: string;
 }

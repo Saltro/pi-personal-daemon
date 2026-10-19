@@ -24,7 +24,7 @@ Minimal TypeScript prototype for a single personal Feishu → Pi carrier daemon.
 - `src/sessions-cli.ts` — local session registry commands.
 - `src/session-registry.ts` — JSON-backed session registry.
 - `src/session-watcher.ts` — async session completion watcher.
-- `src/sender.ts` — outbound sender interface, mock sender, Feishu text sender/reaction helper.
+- `src/sender.ts` — outbound sender interface, mock sender, Feishu interactive-card sender/reaction helper.
 - `src/scheduler.ts` — timed wakeup skeleton with `intervalMs` or simple cron (`minute hour * * *`).
 - `src/daemon.ts` — serial event pipeline.
 - `src/index.ts` — CLI entrypoint source.
@@ -132,12 +132,14 @@ pi-personal bind feishu-chat --chat-id oc_xxx
 pi-personal bind status
 ```
 
-Visible replies always send to the bound Feishu chat. The current inbound context supplies metadata such as `inReplyTo` and `sendCount`:
+Visible replies always send to the bound Feishu chat. The current inbound context supplies metadata such as `inReplyTo`, `sendCount`, and the daemon-populated context usage footer:
 
 ```bash
-pi-personal send hello
-printf 'hello from stdin' | pi-personal send --stdin
+pi-personal send '**hello** from markdown'
+printf 'hello from `stdin`' | pi-personal send --stdin
 ```
+
+The text or stdin body is placed in a Feishu card JSON 2.0 `markdown` element so inline code, lists, and other card markdown features render in the client. The send command appends a small grey footer from the runtime context file with only context occupancy, such as `Context 37%`; agents keep the message body focused on reply content.
 
 Session-control MVP:
 
@@ -157,7 +159,7 @@ The registry is a local JSON file under `runtime.stateDir` or `~/.cache/pi-perso
 
 When `--return` is omitted, `sessions create` defaults to parent notification if `PI_SESSION_ID` or `PI_SESSION_FILE` is available in the current Pi process. Outside Pi, it defaults to `--no-return`. Parent notification is local-file based; the daemon for the same `runtime.stateDir` must be running to deliver the queue entry into the main session.
 
-The runner also exposes `getState()` and `getMessages()` through Pi RPC commands for future status endpoints.
+The runner also exposes `getState()` and `getMessages()` through Pi RPC commands. Before and after each Pi prompt, the daemon calls `get_state` and `get_messages`, extracts context occupancy only from semantically named context/token fields, and stores it in the runtime context file for `pi-personal send`. Current Pi RPC `get_state` in this environment exposes `model.contextWindow`, `model.maxTokens`, model/session/status fields, `messageCount`, and `pendingMessageCount`; `get_messages` exposes assistant `usage` records. The footer never labels message counts, pending counts, or `model.maxTokens` as used tokens. If reliable used+limit data cannot be derived, the footer is `Context usage unavailable`.
 
 ## Scheduler / active wakeups
 
@@ -194,7 +196,7 @@ To use real Feishu text sending, set `sender.type` to `feishu` and configure cre
 }
 ```
 
-`FeishuSender` fetches `/open-apis/auth/v3/tenant_access_token/internal`, caches the tenant token, and sends text through `/open-apis/im/v1/messages?receive_id_type=chat_id` with the bound Feishu chat id stored at `runtime.stateDir/feishu-chat-binding.json` or `~/.cache/pi-personal-daemon/feishu-chat-binding.json`.
+`FeishuSender` fetches `/open-apis/auth/v3/tenant_access_token/internal`, caches the tenant token, and sends interactive cards through `/open-apis/im/v1/messages?receive_id_type=chat_id` with payload shape `{ receive_id, msg_type: "interactive", content: JSON.stringify({ schema: "2.0", config: { wide_screen_mode: true }, body: { elements: [{ tag: "markdown", content: markdownBody }, { tag: "hr" }, { tag: "markdown", content: greyFooter }] } }) }`. The bound Feishu chat id is stored at `runtime.stateDir/feishu-chat-binding.json` or `~/.cache/pi-personal-daemon/feishu-chat-binding.json`.
 
 Real deployment still needs:
 
@@ -206,7 +208,7 @@ Real deployment still needs:
 
 ## Limitations
 
-- Real Feishu sending currently covers text-to-chat only.
+- Real Feishu sending currently covers markdown interactive cards to chat only.
 - `pi-personal send` requires a bound Feishu chat. Real Feishu inbound messages auto-bind the first chat; local/mock-only flows can use `pi-personal bind feishu-chat --chat-id <chat_id>`.
 - HTTP auth is minimal and suitable for local testing only.
 - Event processing is serialized in memory; pending events are lost if the process exits.
