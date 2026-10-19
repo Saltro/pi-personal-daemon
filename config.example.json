@@ -1,0 +1,46 @@
+{
+  "agent": {
+    "sessionId": "personal-agent",
+    "cwd": "/data00/home/fengzhiyang.ping",
+    "piBin": "pi",
+    "extraArgs": [
+      "--no-approve"
+    ],
+    "mock": false
+  },
+  "http": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787,
+    "path": "/feishu/webhook"
+  },
+  "stdin": {
+    "enabled": true
+  },
+  "sender": {
+    "type": "mock",
+    "mockOutbox": "/data00/home/fengzhiyang.ping/pi-personal-daemon/outbox.jsonl"
+  },
+  "feishu": {
+    "appId": "",
+    "appSecret": "",
+    "verificationToken": "",
+    "encryptKey": "",
+    "baseUrl": "https://open.feishu.cn",
+    "eventMode": "ws"
+  },
+  "runtime": {
+    "contextFile": "/tmp/pi-personal-daemon-current-context.json",
+    "stateDir": "/data00/home/fengzhiyang.ping/.cache/pi-personal-daemon"
+  },
+  "scheduler": {
+    "enabled": true,
+    "wakeups": [
+      {
+        "id": "hourly-note",
+        "cron": "0 * * * *",
+        "prompt": "Active wakeup: briefly inspect context and decide whether to send a short personal note."
+      }
+    ]
+  }
+}

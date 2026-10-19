@@ -1,0 +1,30 @@
+{
+  "name": "pi-personal-daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pi-personal": "./dist/cli.js",
+    "pi-personal-daemon": "./dist/index.js"
+  },
+  "description": "Minimal single-agent Feishu to Pi daemon prototype",
+  "scripts": {
+    "build": "rsbuild build && node scripts/fix-bin.js",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "smoke": "tsx test/smoke.ts"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.76.0"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "latest",
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

@@ -1,0 +1,25 @@
+# Local configuration and secrets
+config.json
+*.local.json
+.env
+.env.*
+
+# Runtime state
+logs/
+*.log
+*.pid
+outbox.jsonl
+session-callback-queue.jsonl
+current-context.json
+state/
+.cache/
+cache/
+
+# Dependencies and build output
+node_modules/
+dist/
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
