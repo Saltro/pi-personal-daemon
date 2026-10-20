@@ -27,10 +27,18 @@ function piArgs(config: ReturnType<typeof loadConfig>, record: PersonalSessionRe
   ];
 }
 
-function childEnv(): NodeJS.ProcessEnv {
+function childEnv(record?: PersonalSessionRecord): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PATH: `${process.cwd()}/dist:${process.env.PATH || ''}`,
+    ...(record ? sessionEnv(record) : {}),
+  };
+}
+
+function sessionEnv(record: PersonalSessionRecord): NodeJS.ProcessEnv {
+  return {
+    PI_PERSONAL_SESSION_ID: record.id,
+    ...(record.parentCallback ? { PI_PERSONAL_PARENT_CALLBACK: JSON.stringify(record.parentCallback) } : {}),
   };
 }
 
@@ -51,7 +59,7 @@ async function main(): Promise<void> {
     const child = spawn(config.agent.piBin, piArgs(config, record, prompt), {
       cwd: record.cwd,
       stdio: ['ignore', logFd, logFd],
-      env: childEnv(),
+      env: childEnv(record),
     });
     record.pid = child.pid;
     record = putSession(config, record);

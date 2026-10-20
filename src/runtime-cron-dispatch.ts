@@ -96,7 +96,7 @@ export async function dispatchRuntimeCron(config: AppConfig, record: RuntimeCron
 
   if (record.target === 'new') {
     const id = `${record.id}-${makeSessionId()}`;
-    const session = putSession(config, newSessionRecord(config, { id, name: `cron:${record.id}`, notify: true, parentCallback: mainParentCallback(config), prompt: record.prompt }));
+    const session = putSession(config, newSessionRecord(config, { id, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt }));
     await runSessionPrompt(config, session, record.prompt, false);
     return;
   }
@@ -112,10 +112,10 @@ function fixedSessionTarget(config: AppConfig, record: RuntimeCronRecord, sessio
     session = getSession(config, sessionId);
   } catch (error) {
     if (!(error instanceof Error) || error.message !== `session not found: ${sessionId}`) throw error;
-    session = newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, notify: true, parentCallback: mainParentCallback(config), prompt: record.prompt });
+    session = newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt });
   }
-  session.notify = true;
-  session.parentCallback = session.parentCallback || mainParentCallback(config);
+  session.notify = false;
+  session.parentCallback = mainParentCallback(config);
   return putSession(config, session);
 }
 

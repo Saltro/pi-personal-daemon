@@ -454,18 +454,60 @@ assert.equal(targetRegistry['once-session'].status, 'completed');
 assert.equal(targetRegistry['fixed-a'].status, 'completed');
 assert.equal(targetRegistry['fixed-b'].status, 'completed');
 assert.equal(targetRegistry['fixed-alias'].status, 'completed');
-const targetSessions = JSON.parse(fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'registry.json'), 'utf8')) as { sessions: Record<string, { sessionId: string; lastPrompt?: string }> };
-const newTargetSessionCount = Object.values(targetSessions.sessions).filter(session => session.lastPrompt === 'new target prompt').length;
-assert.equal(newTargetSessionCount, 1);
+const targetSessions = JSON.parse(fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'registry.json'), 'utf8')) as { sessions: Record<string, { id: string; sessionId: string; lastPrompt?: string; notify: boolean; parentCallback?: { queuePath: string } }> };
+const newTargetSessions = Object.values(targetSessions.sessions).filter(session => session.lastPrompt === 'new target prompt');
+assert.equal(newTargetSessions.length, 1);
+assert.equal(newTargetSessions[0].notify, false);
+assert.ok(newTargetSessions[0].parentCallback?.queuePath);
 assert.equal(targetSessions.sessions['target-s1'].sessionId, 'target-s1');
 assert.equal(targetSessions.sessions['target-s1'].lastPrompt, 'session target prompt');
+assert.equal(targetSessions.sessions['target-s1'].notify, false);
 assert.equal(targetSessions.sessions['fixed-child'].sessionId, 'fixed-child');
 assert.equal(targetSessions.sessions['fixed-child'].lastPrompt, 'fixed child prompt b');
+assert.equal(targetSessions.sessions['fixed-child'].notify, false);
+assert.ok(targetSessions.sessions['fixed-child'].parentCallback?.queuePath);
 assert.equal(targetSessions.sessions['fixed-alias-child'].sessionId, 'fixed-alias-child');
 assert.equal(targetSessions.sessions['fixed-alias-child'].lastPrompt, 'fixed alias prompt');
+assert.equal(targetSessions.sessions['fixed-alias-child'].notify, false);
 const fixedChildLog = fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'fixed-child.log'), 'utf8');
 assert.match(fixedChildLog, /fixed child prompt a/);
 assert.match(fixedChildLog, /fixed child prompt b/);
+const callbackRoot = path.join(targetConfig.runtime.stateDir || '', 'session-callbacks');
+assert.equal(fs.existsSync(callbackRoot), false);
+
+const explicitReturn = spawnSync('node', ['dist/cli.js', 'return', '--stdin'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: {
+    ...process.env,
+    PERSONAL_DAEMON_CONFIG: targetConfigPath,
+    PI_PERSONAL_SESSION_ID: 'fixed-child',
+    PI_PERSONAL_PARENT_CALLBACK: JSON.stringify(targetSessions.sessions['fixed-child'].parentCallback),
+  },
+  input: 'explicit cron child return',
+  encoding: 'utf8',
+});
+assert.equal(explicitReturn.status, 0, explicitReturn.stderr);
+const callbackParentDir = targetSessions.sessions['fixed-child'].parentCallback?.queuePath || '';
+const callbackFiles = fs.readdirSync(callbackParentDir).filter(name => name.endsWith('.json'));
+assert.equal(callbackFiles.length, 1);
+const returnNotice = JSON.parse(fs.readFileSync(path.join(callbackParentDir, callbackFiles[0]), 'utf8')) as { type: string; text: string; child?: { id?: string } };
+assert.equal(returnNotice.type, 'session.return');
+assert.equal(returnNotice.text, 'explicit cron child return');
+assert.equal(returnNotice.child?.id, 'fixed-child');
+const explicitReturnEvents: string[] = [];
+const returnDaemon = new PersonalDaemon(targetConfig);
+Object.assign(returnDaemon['runner'], {
+  start: () => undefined,
+  close: () => undefined,
+  isRunning: () => false,
+  promptAndWait: async (message: string) => { explicitReturnEvents.push(message); return ''; },
+  getContextUsage: async () => ({ text: 'Context usage unavailable', source: 'test' }),
+});
+await returnDaemon.enqueue(normalizeInbound({ type: 'message', id: 'evt-return-drain', chatId: 'chat-return-drain', text: 'drain explicit return' }, 'test'));
+returnDaemon.stop();
+assert.equal(fs.existsSync(path.join(callbackParentDir, callbackFiles[0])), false);
+assert.ok(explicitReturnEvents.some(message => message.includes('Child Pi session fixed-child returned:')));
+assert.ok(explicitReturnEvents.some(message => message.includes('explicit cron child return')));
 
 daemon.stop();
 steerDaemon.stop();

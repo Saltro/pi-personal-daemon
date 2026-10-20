@@ -4,7 +4,9 @@ import { newId } from './events.js';
 import { stateDir, type PersonalSessionRecord, type ParentCallback } from './session-registry.js';
 import type { AppConfig, InboundEvent } from './types.js';
 
-export interface ParentCallbackNotice {
+export type ParentCallbackNotice = ParentCompletionNotice | ParentReturnNotice;
+
+export interface ParentCompletionNotice {
   type: 'session.completed';
   id: string;
   createdAt: string;
@@ -21,6 +23,18 @@ export interface ParentCallbackNotice {
     error?: string;
     updatedAt: string;
   };
+}
+
+export interface ParentReturnNotice {
+  type: 'session.return';
+  id: string;
+  createdAt: string;
+  parent: ParentCallback;
+  child?: {
+    id?: string;
+    sessionId?: string;
+  };
+  text: string;
 }
 
 export function callbackRoot(config: AppConfig): string {
@@ -48,9 +62,7 @@ export function detectParentCallback(config: AppConfig): ParentCallback | undefi
 
 export function writeParentNotification(config: AppConfig, record: PersonalSessionRecord): string | undefined {
   if (!record.parentCallback) return undefined;
-  const dir = record.parentCallback.queuePath || callbackQueuePath(config, record.parentCallback.sessionId);
-  fs.mkdirSync(dir, { recursive: true });
-  const notice: ParentCallbackNotice = {
+  const notice: ParentCompletionNotice = {
     type: 'session.completed',
     id: newId('session_callback'),
     createdAt: new Date().toISOString(),
@@ -68,9 +80,19 @@ export function writeParentNotification(config: AppConfig, record: PersonalSessi
       updatedAt: record.updatedAt,
     },
   };
-  const file = path.join(dir, `${Date.now()}-${safeName(record.id)}.json`);
-  fs.writeFileSync(file, JSON.stringify(notice, null, 2));
-  return file;
+  return writeNoticeFile(config, record.parentCallback, notice, record.id);
+}
+
+export function writeParentReturnNotification(config: AppConfig, parent: ParentCallback, text: string, childSessionId?: string): string {
+  const notice: ParentReturnNotice = {
+    type: 'session.return',
+    id: newId('session_return'),
+    createdAt: new Date().toISOString(),
+    parent,
+    child: childSessionId ? { id: childSessionId, sessionId: childSessionId } : undefined,
+    text,
+  };
+  return writeNoticeFile(config, parent, notice, childSessionId || 'return');
 }
 
 export function drainParentNotifications(config: AppConfig): ParentCallbackNotice[] {
@@ -96,7 +118,19 @@ export function drainParentNotifications(config: AppConfig): ParentCallbackNotic
 }
 
 export function noticeToInbound(notice: ParentCallbackNotice): InboundEvent {
-  const lines = [
+  const text = notice.type === 'session.return' ? returnNoticeText(notice) : completionNoticeText(notice);
+  return {
+    id: notice.id,
+    source: 'session-callback',
+    kind: 'wake',
+    chatId: notice.parent.sessionId,
+    text,
+    raw: notice,
+  };
+}
+
+function completionNoticeText(notice: ParentCompletionNotice): string {
+  return [
     `Child Pi session ${notice.child.id} ${notice.child.status}.`,
     `session_id=${notice.child.sessionId}`,
     `cwd=${notice.child.cwd}`,
@@ -107,15 +141,22 @@ export function noticeToInbound(notice: ParentCallbackNotice): InboundEvent {
     notice.child.lastResult ? `last_result:\n${notice.child.lastResult.slice(-3000)}` : undefined,
     '',
     'Decide the next action: send Feishu, inspect child history, continue the child session, or record the result.',
-  ].filter(Boolean);
-  return {
-    id: notice.id,
-    source: 'session-callback',
-    kind: 'wake',
-    chatId: notice.parent.sessionId,
-    text: lines.join('\n'),
-    raw: notice,
-  };
+  ].filter(Boolean).join('\n');
+}
+
+function returnNoticeText(notice: ParentReturnNotice): string {
+  return [
+    notice.child?.id ? `Child Pi session ${notice.child.id} returned:` : 'Child Pi session returned:',
+    notice.text,
+  ].join('\n');
+}
+
+function writeNoticeFile(config: AppConfig, parent: ParentCallback, notice: ParentCallbackNotice, name: string): string {
+  const dir = parent.queuePath || callbackQueuePath(config, parent.sessionId);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${Date.now()}-${safeName(name)}.json`);
+  fs.writeFileSync(file, JSON.stringify(notice, null, 2));
+  return file;
 }
 
 function safeName(value: string): string {

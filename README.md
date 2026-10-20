@@ -19,8 +19,9 @@ Minimal TypeScript prototype for a single personal Feishu → Pi carrier daemon.
 - `src/runtime-context.ts` — current inbound context file used by the local send CLI for reply metadata.
 - `src/feishu-binding.ts` — durable single Feishu chat binding under the daemon state directory.
 - `src/bind-cli.ts` — `pi-personal bind` commands for the Feishu chat binding.
-- `src/cli.ts` — `pi-personal` main CLI with `send`, `bind`, `sessions`, and `cron` subcommands.
+- `src/cli.ts` — `pi-personal` main CLI with `send`, `return`, `bind`, `sessions`, and `cron` subcommands.
 - `src/send-command.ts` — shared send command implementation.
+- `src/return-command.ts` — explicit child/session return command implementation.
 - `src/cron-cli.ts` — persistent runtime cron commands.
 - `src/cron-registry.ts` — JSON-backed runtime cron registry.
 - `src/runtime-cron-dispatch.ts` — daemon dispatcher for persisted runtime cron records.
@@ -124,7 +125,7 @@ pi --mode rpc --session-id <sessionId> ...extraArgs
 
 `agent.sessionDir` is optional. When explicitly configured, the runner adds `--session-dir <sessionDir>`; otherwise Pi uses its normal/default session storage, so `pi --resume` can find the session normally.
 
-For each inbound event, the daemon writes the current context file, sends a processing reaction when a Feishu `message_id` is available, sends a `prompt` command, and waits for `agent_settled`. The prompt tells the agent to call `pi-personal send --stdin` for visible Feishu replies. The daemon logs `reply not sent` when the agent settles without using the send CLI.
+For each inbound event, the daemon writes the current context file, sends a processing reaction when a Feishu `message_id` is available, sends a `prompt` command, and waits for `agent_settled`. The prompt tells the agent to call `pi-personal send --stdin` for visible Feishu replies and `pi-personal return --stdin` for explicit reports to the parent/main Pi session. The daemon logs `reply not sent` when the agent settles without using the send CLI.
 
 ## `pi-personal` CLI
 
@@ -142,6 +143,15 @@ pi-personal send '**hello** from markdown'
 printf 'hello from `stdin`' | pi-personal send --stdin
 ```
 
+Report text back to the parent/main Pi session from a child/session run:
+
+```bash
+pi-personal return 'short status for parent'
+printf 'longer status' | pi-personal return --stdin
+```
+
+`pi-personal return` accepts text args or `--stdin`, writes a local callback queue entry, and requires parent callback metadata from a `pi-personal sessions ... --return` launch or a cron-created child/fixed session. Without that metadata it exits with an error explaining that no parent callback metadata is available.
+
 The text or stdin body is placed in a Feishu card JSON 2.0 `markdown` element so inline code, lists, and other card markdown features render in the client. The card uses the v2 envelope (`schema: "2.0"`, `config.update_multi`, `config.width_mode`, and vertical `body.elements`), matching Feishu's inline-code support and botmux's reply-card shape. The send command appends a small grey footer from the runtime context file with only context occupancy, such as `Context 37%`; agents keep the message body focused on reply content.
 
 Session-control MVP:
@@ -158,7 +168,7 @@ pi-personal sessions history research-1 --lines 80
 
 The registry is a local JSON file under `runtime.stateDir` or `~/.cache/pi-personal-daemon/sessions/registry.json`. Each record stores `id`, `sessionId`, `cwd`, optional `sessionDir`, `status`, watcher `pid`, boolean `notify`, parent callback metadata, timestamps, last prompt/result, log path, and last parent notification path.
 
-`--return` has one meaning: notify the parent/main Pi session when the child session completes. `--notify` remains a compatibility alias, and `--no-notify` remains a compatibility alias for `--no-return`. It writes a local callback queue entry under `runtime.stateDir/session-callbacks/<parent-session-id>/`. The daemon polls that queue and turns the completion into an internal wake message for the main Pi session, so the parent can decide whether to send Feishu with `pi-personal send`, inspect `pi-personal sessions history <id>`, continue the child, or record the result.
+`sessions --return` has one meaning: notify the parent/main Pi session when the child session completes. `--notify` remains a compatibility alias, and `--no-notify` remains a compatibility alias for `--no-return`. It writes a local callback queue entry under `runtime.stateDir/session-callbacks/<parent-session-id>/`. The daemon polls that queue and turns the completion into an internal wake message for the main Pi session, so the parent can decide whether to send Feishu with `pi-personal send`, inspect `pi-personal sessions history <id>`, continue the child, or record the result.
 
 When `--return` is omitted, `sessions create` defaults to parent notification if `PI_SESSION_ID` or `PI_SESSION_FILE` is available in the current Pi process. Outside Pi, it defaults to `--no-return`. Parent notification is local-file based; the daemon for the same `runtime.stateDir` must be running to deliver the queue entry into the main session.
 
@@ -196,7 +206,7 @@ It also accepts standard 5-field cron records:
 
 Supported cron syntax is exactly five fields: `minute hour day-of-month month day-of-week`. Each field supports `*`, `*/n`, single numbers, and comma lists such as `0,30` or `9,17`. Ranges, names, seconds, and macros are outside this subset. Day-of-week accepts `0` or `7` for Sunday. When both day-of-month and day-of-week are specific, either field may match, following common cron behavior.
 
-Wakeups are normalized as internal `wake` events and go through the same Pi RPC and agent-callable send path as Feishu messages. The active Pi session receives the configured prompt with the same instruction to call `pi-personal send --stdin` for visible Feishu replies; `pi-personal send` uses the bound Feishu chat.
+Config-file scheduler wakeups are normalized as internal `wake` events and go through the same Pi RPC and agent-callable send path as Feishu messages. The active Pi session receives the configured prompt with the same instruction to call `pi-personal send --stdin` for visible Feishu replies and `pi-personal return --stdin` for parent/main-session reports; `pi-personal send` uses the bound Feishu chat.
 
 Agents can create and edit persisted runtime schedules with `pi-personal cron`. These schedules are stored under `runtime.stateDir/cron/registry.json`, survive daemon restarts, and are polled by the daemon:
 
@@ -212,11 +222,13 @@ pi-personal cron disable hourly-note
 pi-personal cron delete hourly-note
 ```
 
+Runtime cron target sessions run silently by default. Cron completion alone does not notify the main Pi session. A cron target session has two explicit output paths: call `pi-personal send --stdin` to message the bound Feishu chat, or call `pi-personal return --stdin` to queue a report to the parent/main Pi session.
+
 Runtime cron targets:
 
 - `--target main`: enqueue an internal wake event into the main daemon Pi RPC session.
-- `--target new`: create a new local Pi session and send the prompt there.
-- `--target session:<id>`: use one fixed child Pi session. If the personal session `<id>` exists, the daemon sends the prompt there; if it is missing, the daemon creates it with session id `<id>` and reuses it on future fires.
+- `--target new`: create a new local Pi session and send the prompt there with completion returns disabled.
+- `--target session:<id>`: use one fixed child Pi session with completion returns disabled. If the personal session `<id>` exists, the daemon sends the prompt there and refreshes parent metadata for explicit `pi-personal return`; if it is missing, the daemon creates it with session id `<id>` and reuses it on future fires.
 - `--target-session <id>`: alias for `--target session:<id>`.
 
 Use fixed child sessions for recurring personas or work streams that should keep their own Pi history, for example `--target session:shadow-self` for a recurring shadow-self heartbeat.
@@ -256,6 +268,7 @@ Real deployment still needs:
 
 - Real Feishu sending currently covers markdown interactive cards to chat only.
 - `pi-personal send` requires a bound Feishu chat. Real Feishu inbound messages auto-bind the first chat; local/mock-only flows can use `pi-personal bind feishu-chat --chat-id <chat_id>`.
+- `pi-personal return` requires parent callback metadata from a returned session or cron-created child/fixed session.
 - HTTP auth is minimal and suitable for local testing only.
 - Event processing is serialized in memory; pending events are lost if the process exits.
 - The scheduler supports `intervalMs`, persisted one-shot runtime schedules, and a small 5-field cron subset: `*`, `*/n`, numbers, and comma lists.

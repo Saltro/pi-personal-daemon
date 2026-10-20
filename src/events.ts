@@ -136,8 +136,9 @@ function parseFeishuMessageText(message: FeishuMessage): string {
 
 export function toPiPrompt(event: InboundEvent): string {
   const sendInstruction = 'To send a visible Feishu reply, run: pi-personal send --stdin';
+  const returnInstruction = 'To report back to the parent/main Pi session, run: pi-personal return --stdin';
   if (event.kind === 'wake') {
-    return [sendInstruction, '', event.text].filter(Boolean).join('\n');
+    return [sendInstruction, returnInstruction, '', event.text].filter(Boolean).join('\n');
   }
   return [
     'Feishu inbound message',
@@ -147,6 +148,7 @@ export function toPiPrompt(event: InboundEvent): string {
     event.messageId ? `message_id=${event.messageId}` : undefined,
     event.userId ? `user_id=${event.userId}` : undefined,
     sendInstruction,
+    returnInstruction,
     '',
     event.text,
   ].filter(Boolean).join('\n');

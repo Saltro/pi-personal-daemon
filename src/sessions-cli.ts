@@ -184,7 +184,7 @@ async function runPromptSync(config: AppConfig, record: PersonalSessionRecord, p
   const result = spawnSync(config.agent.piBin, piArgs(config, record, prompt), {
     cwd: record.cwd,
     encoding: 'utf8',
-    env: childEnv(),
+    env: childEnv(record),
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`;
   appendSessionLog(record, output);
@@ -201,16 +201,24 @@ function runPromptAsync(config: AppConfig, record: PersonalSessionRecord, prompt
   fs.mkdirSync(path.dirname(promptFile), { recursive: true });
   fs.writeFileSync(promptFile, prompt);
   const watcherArgs = ['dist/session-watcher.js', '--config', process.env.PERSONAL_DAEMON_CONFIG || `${process.cwd()}/config.json`, '--id', record.id, '--prompt-file', promptFile];
-  const watcher = spawn(process.execPath, watcherArgs, { cwd: process.cwd(), detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: childEnv() });
+  const watcher = spawn(process.execPath, watcherArgs, { cwd: process.cwd(), detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: childEnv(record) });
   record.pid = watcher.pid;
   watcher.unref();
   return putSession(config, record);
 }
 
-function childEnv(): NodeJS.ProcessEnv {
+function childEnv(record?: PersonalSessionRecord): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PATH: `${process.cwd()}/dist:${process.env.PATH || ''}`,
+    ...(record ? sessionEnv(record) : {}),
+  };
+}
+
+function sessionEnv(record: PersonalSessionRecord): NodeJS.ProcessEnv {
+  return {
+    PI_PERSONAL_SESSION_ID: record.id,
+    ...(record.parentCallback ? { PI_PERSONAL_PARENT_CALLBACK: JSON.stringify(record.parentCallback) } : {}),
   };
 }
 
