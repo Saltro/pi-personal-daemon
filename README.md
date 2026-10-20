@@ -25,7 +25,7 @@ Minimal TypeScript prototype for a single personal Feishu → Pi carrier daemon.
 - `src/session-registry.ts` — JSON-backed session registry.
 - `src/session-watcher.ts` — async session completion watcher.
 - `src/sender.ts` — outbound sender interface, mock sender, Feishu interactive-card sender/reaction helper.
-- `src/scheduler.ts` — timed wakeup skeleton with `intervalMs` or simple cron (`minute hour * * *`).
+- `src/scheduler.ts` — timed wakeups with `intervalMs` or a small standard 5-field cron subset.
 - `src/daemon.ts` — serial event pipeline.
 - `src/index.ts` — CLI entrypoint source.
 - `src/types.ts` — shared config/event/sender types.
@@ -163,19 +163,37 @@ The runner also exposes `getState()` and `getMessages()` through Pi RPC commands
 
 ## Scheduler / active wakeups
 
-`config.scheduler.wakeups` accepts records like:
+`config.scheduler.wakeups` accepts interval records:
 
 ```json
 {
-  "id": "hourly-note",
+  "id": "hourly-interval",
   "intervalMs": 3600000,
   "prompt": "Active wakeup: inspect context and decide whether to send."
 }
 ```
 
-A small cron subset also works for minute/hour fields, for example `"0 * * * *"`.
+It also accepts standard 5-field cron records:
 
-Wakeups are normalized as internal events and go through the same Pi RPC and agent-callable send path as Feishu messages.
+```json
+{
+  "id": "hourly-note",
+  "cron": "0 * * * *",
+  "prompt": "Hourly wakeup: inspect context and decide whether to send."
+}
+```
+
+```json
+{
+  "id": "morning-check",
+  "cron": "30 9 * * *",
+  "prompt": "Morning wakeup: review memory and decide whether a short Feishu note would be useful."
+}
+```
+
+Supported cron syntax is exactly five fields: `minute hour day-of-month month day-of-week`. Each field supports `*`, `*/n`, single numbers, and comma lists such as `0,30` or `9,17`. Ranges, names, seconds, and macros are outside this subset. Day-of-week accepts `0` or `7` for Sunday. When both day-of-month and day-of-week are specific, either field may match, following common cron behavior.
+
+Wakeups are normalized as internal `wake` events and go through the same Pi RPC and agent-callable send path as Feishu messages. The active Pi session receives the configured prompt with the same instruction to call `pi-personal send --stdin` for visible Feishu replies; `pi-personal send` uses the bound Feishu chat.
 
 ## Real Feishu wiring notes
 
@@ -212,6 +230,6 @@ Real deployment still needs:
 - `pi-personal send` requires a bound Feishu chat. Real Feishu inbound messages auto-bind the first chat; local/mock-only flows can use `pi-personal bind feishu-chat --chat-id <chat_id>`.
 - HTTP auth is minimal and suitable for local testing only.
 - Event processing is serialized in memory; pending events are lost if the process exits.
-- The scheduler is a skeleton and supports only `intervalMs` or simple minute/hour cron matching.
+- The scheduler supports `intervalMs` and a small 5-field cron subset: `*`, `*/n`, numbers, and comma lists.
 - Pi RPC timeout/error handling is intentionally small.
 - Attachments, images, mentions, and group-specific behavior are normalized as text only in this prototype.

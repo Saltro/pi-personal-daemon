@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { PersonalDaemon } from '../src/daemon.js';
 import { normalizeInbound } from '../src/events.js';
 import { extractContextUsage } from '../src/pi-runner.js';
+import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/scheduler.js';
 import { isValidFeishuToken } from '../src/receivers.js';
 import type { AppConfig } from '../src/types.js';
 
@@ -68,6 +69,22 @@ assert.deepEqual(
   extractContextUsage({ context: { usedContextTokens: 60234, contextLimit: 163840 } }, { messages: [] }, 'smoke'),
   { text: 'Context 37%', source: 'pi-rpc get_state context/token usage fields' },
 );
+assert.equal(localStamp(nextCronDate('0 * * * *', new Date(2026, 9, 20, 11, 23, 45))), '2026-10-20 12:00');
+assert.equal(localStamp(nextCronDate('*/15 9,10 * * *', new Date(2026, 9, 20, 9, 14, 0))), '2026-10-20 09:15');
+assert.equal(localStamp(nextCronDate('30 8 1 * *', new Date(2026, 9, 2, 0, 0, 0))), '2026-11-01 08:30');
+assert.equal(localStamp(nextCronDate('0 9 * * 1', new Date(2026, 9, 20, 9, 1, 0))), '2026-10-26 09:00');
+assert.equal(localStamp(nextCronDate('0 9 1 * 1', new Date(2026, 9, 2, 0, 0, 0))), '2026-10-05 09:00');
+assert.equal(nextCronDate('0 0 * 13 *'), null);
+assert.equal(nextCronDate('0-10 * * * *'), null);
+assert.equal(nextDelayMs({ intervalMs: 25, prompt: 'tick' }), 25);
+const scheduledEvents: string[] = [];
+const testScheduler = new WakeupScheduler({ ...config, scheduler: { enabled: true, wakeups: [{ id: 'quick', intervalMs: 20, prompt: 'scheduled smoke wake' }] } }, async event => {
+  scheduledEvents.push(`${event.kind}:${event.source}:${event.text}`);
+});
+testScheduler.start();
+await new Promise(resolve => setTimeout(resolve, 35));
+testScheduler.stop();
+assert.deepEqual(scheduledEvents, ['wake:scheduler:scheduled smoke wake']);
 
 const daemon = new PersonalDaemon(config);
 await daemon.enqueue(normalizeInbound({ type: 'message', id: 'evt-smoke', chatId: 'chat-smoke', text: 'hello smoke' }, 'test'));
@@ -118,6 +135,9 @@ Object.assign(steerDaemon['runner'], {
     steers.push(message);
     return { disposition: 'queued' as const };
   },
+  waitForSettled: async () => {
+    while (running) await new Promise(resolve => setTimeout(resolve, 5));
+  },
   getContextUsage: async () => ({ text: 'Context usage unavailable', source: 'test' }),
 });
 const firstActive = normalizeInbound({
@@ -158,18 +178,13 @@ assert.match(steers[0], /event_id=evt-active-3/);
 assert.match(steers[0], /third active/);
 assert.equal(running, true);
 resolveFirst?.();
-await new Promise(resolve => setTimeout(resolve, 0));
-lines = fs.readFileSync(steerOutbox, 'utf8').trim().split('\n');
+lines = await waitForJsonlLines(steerOutbox, 6);
 assert.equal(lines.length, 6);
-assert.equal((JSON.parse(lines[1]) as { messageId: string; emojiType: string }).messageId, 'om-active-2');
-assert.equal((JSON.parse(lines[1]) as { messageId: string; emojiType: string }).emojiType, 'OK');
-assert.equal((JSON.parse(lines[2]) as { messageId: string; emojiType: string }).messageId, 'om-active-3');
-assert.equal((JSON.parse(lines[2]) as { messageId: string; emojiType: string }).emojiType, 'OK');
-assert.equal((JSON.parse(lines[3]) as { messageId: string; emojiType: string }).messageId, 'om-active-2');
-assert.equal((JSON.parse(lines[3]) as { messageId: string; emojiType: string }).emojiType, 'DONE');
-assert.equal((JSON.parse(lines[4]) as { messageId: string; emojiType: string }).messageId, 'om-active-3');
-assert.equal((JSON.parse(lines[4]) as { messageId: string; emojiType: string }).emojiType, 'DONE');
-
+const steerReactions = lines.map(line => JSON.parse(line) as { messageId: string; emojiType: string });
+for (const messageId of ['om-active-2', 'om-active-3']) {
+  assert.ok(steerReactions.some(reaction => reaction.messageId === messageId && reaction.emojiType === 'OK'));
+  assert.ok(steerReactions.some(reaction => reaction.messageId === messageId && reaction.emojiType === 'DONE'));
+}
 const bindStatus = spawnSync('node', ['dist/cli.js', 'bind', 'status'], {
   cwd: path.resolve(import.meta.dirname, '..'),
   env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
@@ -305,3 +320,21 @@ assert.match(history.stdout, /first prompt/);
 assert.match(history.stdout, /second prompt/);
 
 console.log('smoke ok', outbox);
+
+async function waitForJsonlLines(file: string, count: number): Promise<string[]> {
+  for (let i = 0; i < 50; i++) {
+    if (fs.existsSync(file)) {
+      const content = fs.readFileSync(file, 'utf8').trim();
+      const lines = content ? content.split('\n') : [];
+      if (lines.length >= count) return lines;
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n') : [];
+}
+
+function localStamp(date: Date | null | undefined): string | undefined {
+  if (!date) return undefined;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

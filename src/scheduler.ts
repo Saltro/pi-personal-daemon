@@ -1,10 +1,12 @@
 import { normalizeInbound } from './events.js';
+import { nextCronDate, parseCronExpression } from './cron-utils.js';
 import type { AppConfig, InboundEvent, SchedulerConfig, WakeupConfig } from './types.js';
 
 export class WakeupScheduler {
   private config: SchedulerConfig;
   private onEvent: (event: InboundEvent) => Promise<void>;
   private timers: NodeJS.Timeout[] = [];
+  private active = false;
 
   constructor(config: AppConfig, onEvent: (event: InboundEvent) => Promise<void>) {
     this.config = config.scheduler;
@@ -13,53 +15,43 @@ export class WakeupScheduler {
 
   start(): void {
     if (!this.config.enabled) return;
+    this.active = true;
     for (const wakeup of this.config.wakeups || []) {
-      const delay = nextDelayMs(wakeup);
-      if (delay == null) {
-        console.error(`[scheduler] unsupported wakeup ${wakeup.id || 'unnamed'}; use intervalMs or simple cron like "0 * * * *"`);
-        continue;
-      }
-      const scheduleOnce = () => {
-        const timer = setTimeout(async () => {
-          await this.onEvent(normalizeInbound({ type: 'wake', ...wakeup }, 'scheduler'));
-          scheduleOnce();
-        }, nextDelayMs(wakeup) ?? delay);
-        this.timers.push(timer);
-      };
-      console.error(`[scheduler] scheduled ${wakeup.id || 'wake'} in ${Math.round(delay / 1000)}s`);
-      const timer = setTimeout(async () => {
-        await this.onEvent(normalizeInbound({ type: 'wake', ...wakeup }, 'scheduler'));
-        scheduleOnce();
-      }, delay);
-      this.timers.push(timer);
+      this.schedule(wakeup);
     }
   }
 
   stop(): void {
+    this.active = false;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
   }
-}
 
-function nextDelayMs(wakeup: WakeupConfig): number | null {
-  if (Number.isFinite(wakeup.intervalMs)) return wakeup.intervalMs as number;
-  if (!wakeup.cron) return null;
-  const parts = wakeup.cron.trim().split(/\s+/);
-  if (parts.length !== 5) return null;
-  const [minute, hour] = parts;
-  const now = new Date();
-  for (let i = 1; i <= 24 * 60; i++) {
-    const candidate = new Date(now.getTime() + i * 60 * 1000);
-    if (matches(minute, candidate.getMinutes()) && matches(hour, candidate.getHours())) {
-      candidate.setSeconds(0, 0);
-      return Math.max(1000, candidate.getTime() - now.getTime());
+  private schedule(wakeup: WakeupConfig): void {
+    if (!this.active) return;
+    const delay = nextDelayMs(wakeup);
+    if (delay == null) {
+      console.error(`[scheduler] unsupported wakeup ${wakeup.id || 'unnamed'}; use intervalMs or cron fields with *, */n, numbers, and comma lists`);
+      return;
     }
+    console.error(`[scheduler] scheduled ${wakeup.id || 'wake'} in ${Math.round(delay / 1000)}s`);
+    const timer = setTimeout(async () => {
+      this.timers = this.timers.filter(item => item !== timer);
+      try {
+        await this.onEvent(normalizeInbound({ type: 'wake', ...wakeup }, 'scheduler'));
+      } finally {
+        if (this.active) this.schedule(wakeup);
+      }
+    }, delay);
+    this.timers.push(timer);
   }
-  return null;
 }
 
-function matches(expr: string, value: number): boolean {
-  if (expr === '*') return true;
-  if (expr.startsWith('*/')) return value % Number(expr.slice(2)) === 0;
-  return Number(expr) === value;
+export function nextDelayMs(wakeup: WakeupConfig, now = new Date()): number | null {
+  if (Number.isFinite(wakeup.intervalMs) && (wakeup.intervalMs as number) > 0) return wakeup.intervalMs as number;
+  if (!wakeup.cron) return null;
+  const next = nextCronDate(wakeup.cron, now);
+  return next ? Math.max(1000, next.getTime() - now.getTime()) : null;
 }
+
+export { nextCronDate, parseCronExpression };

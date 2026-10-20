@@ -40,6 +40,16 @@
         "id": "hourly-note",
         "cron": "0 * * * *",
         "prompt": "Active wakeup: briefly inspect context and decide whether to send a short personal note."
+      },
+      {
+        "id": "morning-check",
+        "cron": "30 9 * * *",
+        "prompt": "Morning wakeup: review memory and decide whether a short Feishu note would be useful."
+      },
+      {
+        "id": "dev-fast-loop",
+        "intervalMs": 3600000,
+        "prompt": "Development interval wakeup: verify the scheduler path."
       }
     ]
   }
