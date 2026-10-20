@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { PersonalDaemon } from '../src/daemon.js';
 import { normalizeInbound } from '../src/events.js';
+import { loadCronRegistry } from '../src/cron-registry.js';
 import { extractContextUsage } from '../src/pi-runner.js';
+import { RuntimeCronDispatcher } from '../src/runtime-cron-dispatch.js';
 import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/scheduler.js';
 import { isValidFeishuToken } from '../src/receivers.js';
 import type { AppConfig } from '../src/types.js';
@@ -319,6 +321,106 @@ assert.equal(history.status, 0, history.stderr);
 assert.match(history.stdout, /first prompt/);
 assert.match(history.stdout, /second prompt/);
 
+const cronCreate = spawnSync('node', ['dist/cli.js', 'cron', 'create', '--id', 'c1', '--prompt', 'cron prompt', '--cron', '0 * * * *', '--target', 'main'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
+  encoding: 'utf8',
+});
+assert.equal(cronCreate.status, 0, cronCreate.stderr);
+let cronRecord = JSON.parse(cronCreate.stdout) as { id?: string; prompt: string; enabled: boolean; target: string; nextRunAt?: string; schedule: { type: string } };
+assert.equal(cronRecord.id, 'c1');
+assert.equal(cronRecord.prompt, 'cron prompt');
+assert.equal(cronRecord.enabled, true);
+assert.equal(cronRecord.target, 'main');
+assert.ok(cronRecord.nextRunAt);
+assert.equal(loadCronRegistry(config).crons.c1.prompt, 'cron prompt');
+const cronList = spawnSync('node', ['dist/cli.js', 'cron', 'list'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
+  encoding: 'utf8',
+});
+assert.equal(cronList.status, 0, cronList.stderr);
+assert.match(cronList.stdout, /^c1\tscheduled\ttrue\tmain/m);
+const cronUpdate = spawnSync('node', ['dist/cli.js', 'cron', 'update', 'c1', '--prompt', 'updated cron prompt', '--at', new Date(Date.now() + 60_000).toISOString(), '--target', 'new', '--disabled'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
+  encoding: 'utf8',
+});
+assert.equal(cronUpdate.status, 0, cronUpdate.stderr);
+cronRecord = JSON.parse(cronUpdate.stdout) as { id?: string; prompt: string; enabled: boolean; target: string; nextRunAt?: string; schedule: { type: string } };
+assert.equal(cronRecord.prompt, 'updated cron prompt');
+assert.equal(cronRecord.enabled, false);
+assert.equal(cronRecord.target, 'new');
+assert.equal(cronRecord.schedule.type, 'at');
+const cronDisable = spawnSync('node', ['dist/cli.js', 'cron', 'disable', 'c1'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
+  encoding: 'utf8',
+});
+assert.equal(cronDisable.status, 0, cronDisable.stderr);
+const cronStatus = spawnSync('node', ['dist/cli.js', 'cron', 'status', 'c1'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
+  encoding: 'utf8',
+});
+assert.equal(cronStatus.status, 0, cronStatus.stderr);
+assert.equal(JSON.parse(cronStatus.stdout).status, 'disabled');
+const cronDelete = spawnSync('node', ['dist/cli.js', 'cron', 'delete', 'c1'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: configPath },
+  encoding: 'utf8',
+});
+assert.equal(cronDelete.status, 0, cronDelete.stderr);
+assert.equal(loadCronRegistry(config).crons.c1, undefined);
+
+const runtimeEvents: string[] = [];
+const runtimeCronConfig: AppConfig = { ...config, scheduler: { enabled: false, wakeups: [] }, runtime: { contextFile: path.join(tmp, 'cron-context.json'), stateDir: path.join(tmp, 'cron-state') } };
+const dueAt = new Date(Date.now() - 1000).toISOString();
+spawnSync('node', ['dist/cli.js', 'cron', 'create', '--id', 'once-main', '--prompt', 'one shot main', '--at', dueAt, '--target', 'main'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: writeConfig(tmp, 'config-cron-main.json', runtimeCronConfig) },
+  encoding: 'utf8',
+});
+const runtimeScheduler = new RuntimeCronDispatcher(runtimeCronConfig, async event => {
+  runtimeEvents.push(`${event.kind}:${event.source}:${event.text}`);
+});
+runtimeScheduler.start();
+await new Promise(resolve => setTimeout(resolve, 50));
+runtimeScheduler.stop();
+assert.deepEqual(runtimeEvents, ['wake:runtime-cron:one shot main']);
+const completedOnce = loadCronRegistry(runtimeCronConfig).crons['once-main'];
+assert.equal(completedOnce.status, 'completed');
+assert.equal(completedOnce.enabled, false);
+assert.ok(completedOnce.lastFiredAt);
+
+const targetConfig: AppConfig = { ...config, runtime: { contextFile: path.join(tmp, 'cron-target-context.json'), stateDir: path.join(tmp, 'cron-target-state') } };
+const targetConfigPath = writeConfig(tmp, 'config-cron-target.json', targetConfig);
+spawnSync('node', ['dist/cli.js', 'sessions', 'create', '--id', 'target-s1', '--no-return'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: targetConfigPath },
+  encoding: 'utf8',
+});
+for (const [id, target, prompt] of [['once-new', 'new', 'new target prompt'], ['once-session', 'session:target-s1', 'session target prompt']] as const) {
+  const createdCron = spawnSync('node', ['dist/cli.js', 'cron', 'create', '--id', id, '--prompt', prompt, '--at', dueAt, '--target', target], {
+    cwd: path.resolve(import.meta.dirname, '..'),
+    env: { ...process.env, PERSONAL_DAEMON_CONFIG: targetConfigPath },
+    encoding: 'utf8',
+  });
+  assert.equal(createdCron.status, 0, createdCron.stderr);
+}
+const targetScheduler = new RuntimeCronDispatcher(targetConfig, async () => undefined);
+targetScheduler.start();
+await new Promise(resolve => setTimeout(resolve, 80));
+targetScheduler.stop();
+const targetRegistry = loadCronRegistry(targetConfig).crons;
+assert.equal(targetRegistry['once-new'].status, 'completed');
+assert.equal(targetRegistry['once-session'].status, 'completed');
+const targetSessions = fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'registry.json'), 'utf8');
+assert.match(targetSessions, /new target prompt/);
+assert.match(targetSessions, /session target prompt/);
+
+daemon.stop();
+steerDaemon.stop();
 console.log('smoke ok', outbox);
 
 async function waitForJsonlLines(file: string, count: number): Promise<string[]> {
@@ -337,4 +439,10 @@ function localStamp(date: Date | null | undefined): string | undefined {
   if (!date) return undefined;
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function writeConfig(dir: string, name: string, value: AppConfig): string {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, JSON.stringify(value));
+  return file;
 }

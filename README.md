@@ -19,8 +19,11 @@ Minimal TypeScript prototype for a single personal Feishu → Pi carrier daemon.
 - `src/runtime-context.ts` — current inbound context file used by the local send CLI for reply metadata.
 - `src/feishu-binding.ts` — durable single Feishu chat binding under the daemon state directory.
 - `src/bind-cli.ts` — `pi-personal bind` commands for the Feishu chat binding.
-- `src/cli.ts` — `pi-personal` main CLI with `send`, `bind`, and `sessions` subcommands.
+- `src/cli.ts` — `pi-personal` main CLI with `send`, `bind`, `sessions`, and `cron` subcommands.
 - `src/send-command.ts` — shared send command implementation.
+- `src/cron-cli.ts` — persistent runtime cron commands.
+- `src/cron-registry.ts` — JSON-backed runtime cron registry.
+- `src/runtime-cron-dispatch.ts` — daemon dispatcher for persisted runtime cron records.
 - `src/sessions-cli.ts` — local session registry commands.
 - `src/session-registry.ts` — JSON-backed session registry.
 - `src/session-watcher.ts` — async session completion watcher.
@@ -195,6 +198,27 @@ Supported cron syntax is exactly five fields: `minute hour day-of-month month da
 
 Wakeups are normalized as internal `wake` events and go through the same Pi RPC and agent-callable send path as Feishu messages. The active Pi session receives the configured prompt with the same instruction to call `pi-personal send --stdin` for visible Feishu replies; `pi-personal send` uses the bound Feishu chat.
 
+Agents can create and edit persisted runtime schedules with `pi-personal cron`. These schedules are stored under `runtime.stateDir/cron/registry.json`, survive daemon restarts, and are polled by the daemon:
+
+```bash
+pi-personal cron create --id hourly-note --cron "0 * * * *" --prompt "Hourly wakeup: inspect context and decide whether to send." --target main
+pi-personal cron create --id morning-check --cron "30 9 * * *" --prompt "Morning wakeup" --target main
+pi-personal cron create --id one-shot --at "2026-10-21T09:30:00+08:00" --prompt "One-shot wakeup" --target new
+pi-personal cron list
+pi-personal cron status hourly-note
+pi-personal cron update hourly-note --prompt "Updated hourly prompt" --target session:research-1
+pi-personal cron disable hourly-note
+pi-personal cron delete hourly-note
+```
+
+Runtime cron targets:
+
+- `--target main`: enqueue an internal wake event into the main daemon Pi RPC session.
+- `--target new`: create a new local Pi session and send the prompt there.
+- `--target session:<id>`: send the prompt to an existing local session registry entry.
+
+One-shot schedules use `--at <timestamp>` and complete automatically after firing. Recurring schedules use `--cron <expr>` and stay scheduled after each successful fire. `--stdin` can replace `--prompt <text>` for longer prompts.
+
 ## Real Feishu wiring notes
 
 The HTTP receiver handles Feishu URL verification (`type=url_verification`), Feishu event callback v2 message shape, plaintext verification-token checking, and encrypted callback decryption with `FEISHU_ENCRYPT_KEY`.
@@ -230,6 +254,6 @@ Real deployment still needs:
 - `pi-personal send` requires a bound Feishu chat. Real Feishu inbound messages auto-bind the first chat; local/mock-only flows can use `pi-personal bind feishu-chat --chat-id <chat_id>`.
 - HTTP auth is minimal and suitable for local testing only.
 - Event processing is serialized in memory; pending events are lost if the process exits.
-- The scheduler supports `intervalMs` and a small 5-field cron subset: `*`, `*/n`, numbers, and comma lists.
+- The scheduler supports `intervalMs`, persisted one-shot runtime schedules, and a small 5-field cron subset: `*`, `*/n`, numbers, and comma lists.
 - Pi RPC timeout/error handling is intentionally small.
 - Attachments, images, mentions, and group-specific behavior are normalized as text only in this prototype.

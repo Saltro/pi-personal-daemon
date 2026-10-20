@@ -52,5 +52,9 @@
         "prompt": "Development interval wakeup: verify the scheduler path."
       }
     ]
-  }
+  },
+  "runtimeCronExamples": [
+    "pi-personal cron create --id hourly-note --cron '0 * * * *' --prompt 'Hourly wakeup' --target main",
+    "pi-personal cron create --id one-shot --at '2026-10-21T09:30:00+08:00' --prompt 'One-shot wakeup' --target new"
+  ]
 }

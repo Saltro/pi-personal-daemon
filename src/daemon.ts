@@ -4,6 +4,7 @@ import { drainParentNotifications, noticeToInbound } from './session-callbacks.j
 import { PiRpcRunner } from './pi-runner.js';
 import { createSender } from './sender.js';
 import { readCurrentContext, recordContextUsage, writeCurrentContext } from './runtime-context.js';
+import { RuntimeCronDispatcher } from './runtime-cron-dispatch.js';
 import { startHttpReceiver, startStdinReceiver } from './receivers.js';
 import { WakeupScheduler } from './scheduler.js';
 import { startFeishuWsReceiver } from './feishu-ws.js';
@@ -24,6 +25,7 @@ export class PersonalDaemon {
   private httpServer: Server | null = null;
   private stdinReceiver: Interface | null = null;
   private scheduler: WakeupScheduler;
+  private runtimeCron: RuntimeCronDispatcher;
   private feishuWs: { close(params?: { force?: boolean }): void; getConnectionStatus?: () => unknown } | null = null;
   private callbackPoller: NodeJS.Timeout | null = null;
   private seenInbound = new Map<string, number>();
@@ -34,6 +36,7 @@ export class PersonalDaemon {
     this.runner = new PiRpcRunner(config);
     this.sender = createSender(config);
     this.scheduler = new WakeupScheduler(config, event => this.enqueue(event));
+    this.runtimeCron = new RuntimeCronDispatcher(config, event => this.enqueue(event));
   }
 
   start(): void {
@@ -50,6 +53,7 @@ export class PersonalDaemon {
     }
     this.stdinReceiver = startStdinReceiver(this.config, event => this.enqueue(event));
     this.scheduler.start();
+    this.runtimeCron.start();
     this.startCallbackPoller();
   }
 
@@ -209,6 +213,7 @@ export class PersonalDaemon {
 
   stop(): void {
     this.scheduler.stop();
+    this.runtimeCron.stop();
     if (this.callbackPoller) clearInterval(this.callbackPoller);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.debouncedMessages.length) this.flushDebouncedMessages();

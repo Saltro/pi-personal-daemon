@@ -106,7 +106,7 @@ async function createSession(config: AppConfig, opts: ParsedOptions): Promise<vo
     prompt,
   });
   putSession(config, record);
-  if (prompt) record = await runPrompt(config, record, prompt, Boolean(opts.wait));
+  if (prompt) record = await runSessionPrompt(config, record, prompt, Boolean(opts.wait));
   console.log(JSON.stringify(record, null, 2));
 }
 
@@ -120,7 +120,7 @@ async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void
     record.notify = opts.notify;
     record.parentCallback = opts.notify ? detectParentCallback(config) : undefined;
   }
-  record = await runPrompt(config, record, prompt, Boolean(opts.wait));
+  record = await runSessionPrompt(config, record, prompt, Boolean(opts.wait));
   console.log(JSON.stringify(record, null, 2));
 }
 
@@ -147,7 +147,8 @@ function historySession(config: AppConfig, opts: ParsedOptions): void {
   console.log(lines.slice(-count).join('\n'));
 }
 
-async function runPrompt(config: AppConfig, record: PersonalSessionRecord, prompt: string, wait: boolean): Promise<PersonalSessionRecord> {
+export async function runSessionPrompt(config: AppConfig, session: PersonalSessionRecord | string, prompt: string, wait: boolean): Promise<PersonalSessionRecord> {
+  let record = typeof session === 'string' ? getSession(config, session) : session;
   record.status = 'running';
   record.lastPrompt = prompt;
   record.error = undefined;
