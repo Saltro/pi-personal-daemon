@@ -22,10 +22,10 @@ interface ParsedOptions {
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal cron create --id <id> --prompt <text>|--stdin (--cron <expr> | --at <time>) [--target main|new|session:<id>] [--enabled|--disabled]
+  pi-personal cron create --id <id> --prompt <text>|--stdin (--cron <expr> | --at <time>) [--target main|new|session:<id>] [--target-session <id>] [--enabled|--disabled]
   pi-personal cron list
   pi-personal cron status <id>
-  pi-personal cron update <id> [--prompt <text>|--stdin] [--cron <expr>|--at <time>] [--target main|new|session:<id>] [--enabled|--disabled]
+  pi-personal cron update <id> [--prompt <text>|--stdin] [--cron <expr>|--at <time>] [--target main|new|session:<id>] [--target-session <id>] [--enabled|--disabled]
   pi-personal cron disable <id>
   pi-personal cron delete <id>`);
   process.exit(2);
@@ -43,6 +43,7 @@ function parseOptions(args: string[]): ParsedOptions {
     else if (arg === '--cron') out.cron = needValue(args, ++i, arg);
     else if (arg === '--at') out.at = needValue(args, ++i, arg);
     else if (arg === '--target') out.target = parseTarget(needValue(args, ++i, arg));
+    else if (arg === '--target-session') out.target = parseTargetSession(needValue(args, ++i, arg));
     else if (arg.startsWith('--')) usage();
     else out.positionals.push(arg);
   }
@@ -52,6 +53,10 @@ function parseOptions(args: string[]): ParsedOptions {
 function parseTarget(value: string): RuntimeCronTarget {
   if (value === 'main' || value === 'new' || value.startsWith('session:')) return value as RuntimeCronTarget;
   throw new Error(`invalid --target: ${value}`);
+}
+
+function parseTargetSession(value: string): RuntimeCronTarget {
+  return parseTarget(`session:${value}`);
 }
 
 function needValue(args: string[], index: number, flag: string): string {

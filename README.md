@@ -204,6 +204,7 @@ Agents can create and edit persisted runtime schedules with `pi-personal cron`. 
 pi-personal cron create --id hourly-note --cron "0 * * * *" --prompt "Hourly wakeup: inspect context and decide whether to send." --target main
 pi-personal cron create --id morning-check --cron "30 9 * * *" --prompt "Morning wakeup" --target main
 pi-personal cron create --id one-shot --at "2026-10-21T09:30:00+08:00" --prompt "One-shot wakeup" --target new
+pi-personal cron create --id shadow-self --cron "0 */2 * * *" --prompt "Shadow self heartbeat" --target session:shadow-self
 pi-personal cron list
 pi-personal cron status hourly-note
 pi-personal cron update hourly-note --prompt "Updated hourly prompt" --target session:research-1
@@ -215,7 +216,10 @@ Runtime cron targets:
 
 - `--target main`: enqueue an internal wake event into the main daemon Pi RPC session.
 - `--target new`: create a new local Pi session and send the prompt there.
-- `--target session:<id>`: send the prompt to an existing local session registry entry.
+- `--target session:<id>`: use one fixed child Pi session. If the personal session `<id>` exists, the daemon sends the prompt there; if it is missing, the daemon creates it with session id `<id>` and reuses it on future fires.
+- `--target-session <id>`: alias for `--target session:<id>`.
+
+Use fixed child sessions for recurring personas or work streams that should keep their own Pi history, for example `--target session:shadow-self` for a recurring shadow-self heartbeat.
 
 One-shot schedules use `--at <timestamp>` and complete automatically after firing. Recurring schedules use `--cron <expr>` and stay scheduled after each successful fire. `--stdin` can replace `--prompt <text>` for longer prompts.
 

@@ -400,7 +400,12 @@ spawnSync('node', ['dist/cli.js', 'sessions', 'create', '--id', 'target-s1', '--
   env: { ...process.env, PERSONAL_DAEMON_CONFIG: targetConfigPath },
   encoding: 'utf8',
 });
-for (const [id, target, prompt] of [['once-new', 'new', 'new target prompt'], ['once-session', 'session:target-s1', 'session target prompt']] as const) {
+for (const [id, target, prompt] of [
+  ['once-new', 'new', 'new target prompt'],
+  ['once-session', 'session:target-s1', 'session target prompt'],
+  ['fixed-a', 'session:fixed-child', 'fixed child prompt a'],
+  ['fixed-b', 'session:fixed-child', 'fixed child prompt b'],
+] as const) {
   const createdCron = spawnSync('node', ['dist/cli.js', 'cron', 'create', '--id', id, '--prompt', prompt, '--at', dueAt, '--target', target], {
     cwd: path.resolve(import.meta.dirname, '..'),
     env: { ...process.env, PERSONAL_DAEMON_CONFIG: targetConfigPath },
@@ -408,6 +413,13 @@ for (const [id, target, prompt] of [['once-new', 'new', 'new target prompt'], ['
   });
   assert.equal(createdCron.status, 0, createdCron.stderr);
 }
+const aliasCron = spawnSync('node', ['dist/cli.js', 'cron', 'create', '--id', 'fixed-alias', '--prompt', 'fixed alias prompt', '--at', dueAt, '--target-session', 'fixed-alias-child'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: targetConfigPath },
+  encoding: 'utf8',
+});
+assert.equal(aliasCron.status, 0, aliasCron.stderr);
+assert.equal(JSON.parse(aliasCron.stdout).target, 'session:fixed-alias-child');
 const targetScheduler = new RuntimeCronDispatcher(targetConfig, async () => undefined);
 targetScheduler.start();
 await new Promise(resolve => setTimeout(resolve, 80));
@@ -415,9 +427,21 @@ targetScheduler.stop();
 const targetRegistry = loadCronRegistry(targetConfig).crons;
 assert.equal(targetRegistry['once-new'].status, 'completed');
 assert.equal(targetRegistry['once-session'].status, 'completed');
-const targetSessions = fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'registry.json'), 'utf8');
-assert.match(targetSessions, /new target prompt/);
-assert.match(targetSessions, /session target prompt/);
+assert.equal(targetRegistry['fixed-a'].status, 'completed');
+assert.equal(targetRegistry['fixed-b'].status, 'completed');
+assert.equal(targetRegistry['fixed-alias'].status, 'completed');
+const targetSessions = JSON.parse(fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'registry.json'), 'utf8')) as { sessions: Record<string, { sessionId: string; lastPrompt?: string }> };
+const newTargetSessionCount = Object.values(targetSessions.sessions).filter(session => session.lastPrompt === 'new target prompt').length;
+assert.equal(newTargetSessionCount, 1);
+assert.equal(targetSessions.sessions['target-s1'].sessionId, 'target-s1');
+assert.equal(targetSessions.sessions['target-s1'].lastPrompt, 'session target prompt');
+assert.equal(targetSessions.sessions['fixed-child'].sessionId, 'fixed-child');
+assert.equal(targetSessions.sessions['fixed-child'].lastPrompt, 'fixed child prompt b');
+assert.equal(targetSessions.sessions['fixed-alias-child'].sessionId, 'fixed-alias-child');
+assert.equal(targetSessions.sessions['fixed-alias-child'].lastPrompt, 'fixed alias prompt');
+const fixedChildLog = fs.readFileSync(path.join(targetConfig.runtime.stateDir || '', 'sessions', 'fixed-child.log'), 'utf8');
+assert.match(fixedChildLog, /fixed child prompt a/);
+assert.match(fixedChildLog, /fixed child prompt b/);
 
 daemon.stop();
 steerDaemon.stop();

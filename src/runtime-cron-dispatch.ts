@@ -1,7 +1,7 @@
 import { normalizeInbound } from './events.js';
 import { loadCronRegistry, saveCronRegistry, normalizeRuntimeCron, type RuntimeCronRecord } from './cron-registry.js';
 import { callbackQueuePath } from './session-callbacks.js';
-import { getSession, makeSessionId, newSessionRecord, putSession, type ParentCallback } from './session-registry.js';
+import { getSession, makeSessionId, newSessionRecord, putSession, type ParentCallback, type PersonalSessionRecord } from './session-registry.js';
 import { runSessionPrompt } from './sessions-cli.js';
 import type { AppConfig, InboundEvent } from './types.js';
 
@@ -101,10 +101,21 @@ export async function dispatchRuntimeCron(config: AppConfig, record: RuntimeCron
   }
 
   const sessionId = record.target.slice('session:'.length);
-  const session = getSession(config, sessionId);
+  const session = fixedSessionTarget(config, record, sessionId);
+  await runSessionPrompt(config, session, record.prompt, false);
+}
+
+function fixedSessionTarget(config: AppConfig, record: RuntimeCronRecord, sessionId: string): PersonalSessionRecord {
+  let session: PersonalSessionRecord;
+  try {
+    session = getSession(config, sessionId);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== `session not found: ${sessionId}`) throw error;
+    session = newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, notify: true, parentCallback: mainParentCallback(config), prompt: record.prompt });
+  }
   session.notify = true;
   session.parentCallback = session.parentCallback || mainParentCallback(config);
-  await runSessionPrompt(config, session, record.prompt, false);
+  return putSession(config, session);
 }
 
 function mainParentCallback(config: AppConfig): ParentCallback {
