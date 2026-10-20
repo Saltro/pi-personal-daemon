@@ -81,6 +81,7 @@ export function markRuntimeCronFinished(config: AppConfig, id: string, error?: s
     registry.crons[id] = record;
   } else {
     record.status = 'scheduled';
+    record.nextRunAt = undefined;
     registry.crons[id] = normalizeRuntimeCron(record, now);
   }
   saveCronRegistry(config, registry);

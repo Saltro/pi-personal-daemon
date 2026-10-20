@@ -86,6 +86,8 @@ export function computeNextRunAt(record: RuntimeCronRecord, now = new Date()): s
     const at = parseAtDate(record.schedule.at);
     return at?.toISOString();
   }
+  const existing = record.nextRunAt ? Date.parse(record.nextRunAt) : NaN;
+  if (Number.isFinite(existing) && existing <= now.getTime()) return record.nextRunAt;
   const next = nextCronDate(record.schedule.expression, now);
   return next?.toISOString();
 }

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { PersonalDaemon } from '../src/daemon.js';
 import { normalizeInbound } from '../src/events.js';
-import { loadCronRegistry } from '../src/cron-registry.js';
+import { loadCronRegistry, saveCronRegistry } from '../src/cron-registry.js';
 import { extractContextUsage } from '../src/pi-runner.js';
 import { RuntimeCronDispatcher } from '../src/runtime-cron-dispatch.js';
 import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/scheduler.js';
@@ -392,6 +392,30 @@ const completedOnce = loadCronRegistry(runtimeCronConfig).crons['once-main'];
 assert.equal(completedOnce.status, 'completed');
 assert.equal(completedOnce.enabled, false);
 assert.ok(completedOnce.lastFiredAt);
+
+const recurringCreate = spawnSync('node', ['dist/cli.js', 'cron', 'create', '--id', 'recurring-overdue', '--prompt', 'recurring overdue main', '--cron', '* * * * *', '--target', 'main'], {
+  cwd: path.resolve(import.meta.dirname, '..'),
+  env: { ...process.env, PERSONAL_DAEMON_CONFIG: writeConfig(tmp, 'config-cron-recurring.json', runtimeCronConfig) },
+  encoding: 'utf8',
+});
+assert.equal(recurringCreate.status, 0, recurringCreate.stderr);
+let recurringRegistry = loadCronRegistry(runtimeCronConfig);
+recurringRegistry.crons['recurring-overdue'].nextRunAt = dueAt;
+saveCronRegistry(runtimeCronConfig, recurringRegistry);
+const recurringEvents: string[] = [];
+const recurringScheduler = new RuntimeCronDispatcher(runtimeCronConfig, async event => {
+  recurringEvents.push(`${event.kind}:${event.source}:${event.text}`);
+});
+recurringScheduler.start();
+await new Promise(resolve => setTimeout(resolve, 80));
+recurringScheduler.stop();
+assert.deepEqual(recurringEvents, ['wake:runtime-cron:recurring overdue main']);
+const completedRecurring = loadCronRegistry(runtimeCronConfig).crons['recurring-overdue'];
+assert.equal(completedRecurring.status, 'scheduled');
+assert.equal(completedRecurring.enabled, true);
+assert.ok(completedRecurring.lastFiredAt);
+assert.ok(completedRecurring.nextRunAt);
+assert.ok(Date.parse(completedRecurring.nextRunAt) > Date.now());
 
 const targetConfig: AppConfig = { ...config, runtime: { contextFile: path.join(tmp, 'cron-target-context.json'), stateDir: path.join(tmp, 'cron-target-state') } };
 const targetConfigPath = writeConfig(tmp, 'config-cron-target.json', targetConfig);
