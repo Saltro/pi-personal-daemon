@@ -42,10 +42,10 @@ const config: AppConfig = {
   runtime: { stateDir: path.join(tmp, 'state'), configPath },
 };
 const returnHarness = path.join(tmp, 'return-harness.cjs');
-fs.writeFileSync(returnHarness, `const {execFileSync}=require('node:child_process');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{execFileSync(process.execPath,[${JSON.stringify(path.join(project, 'dist', 'cli.js'))},'return','--stdin'],{input:prompt,stdio:['pipe','pipe','inherit']});console.log('explicit return queued');});`);
+fs.writeFileSync(returnHarness, `const {execFileSync}=require('node:child_process');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{execFileSync('pi-personal-daemon',['return','--stdin'],{input:prompt,stdio:['pipe','pipe','inherit']});console.log('explicit return queued');});`);
 config.agentProfiles!.returns = { backend: 'process', command: process.execPath, args: [returnHarness] };
 fs.writeFileSync(configPath, JSON.stringify(config));
-const cli = path.join(project, 'dist', 'cli.js');
+const cli = path.join(project, 'dist', 'index.js');
 const env: NodeJS.ProcessEnv = { ...process.env, PERSONAL_DAEMON_CONFIG: configPath };
 for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'PI_PERSONAL_SESSION_ID', 'PI_PERSONAL_PARENT_CALLBACK', 'PI_DAEMON_AGENT_PROFILE', 'PI_DAEMON_MOCK', 'PI_DAEMON_STATE_DIR']) delete env[key];
 function command(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {

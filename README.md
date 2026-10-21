@@ -20,11 +20,14 @@ pnpm test
 ```bash
 pnpm run build
 node dist/index.js
+# With dist on PATH, the same entry runs subcommands:
+export PATH="$PWD/dist:$PATH"
+pi-personal-daemon --help
 # Source-mode development:
 pnpm run dev
 ```
 
-Bundles: `dist/index.js` (daemon), `dist/cli.js` (local CLI), `dist/session-watcher.js` (async supervisor). The build also writes an executable `dist/pi-personal` helper. Use an installed package binary or put `dist` on your PATH for manual CLI calls; agent subprocesses receive the installed helper path automatically.
+Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes an executable `dist/pi-personal-daemon` helper. Running `pi-personal-daemon` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, and `cron` run their subcommands and exit. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
 
 ## Configuration
 
@@ -52,7 +55,7 @@ Common overrides: `PI_DAEMON_SESSION_ID`, `PI_DAEMON_CWD`, `PI_BIN`, `PI_DAEMON_
 ### Channel adapters
 
 - **`feishu`** (default): existing webhook / WebSocket receivers, interactive-card sender, reactions, and ten-second user-message debounce. `sender.type=mock` writes cards and reactions to JSONL instead of calling Feishu.
-- **`stdio`**: stdin ingestion and plain-text stdout output from `pi-personal send`; no Feishu receiver, card, reaction, or debounce. Output belongs to the send process's stdout, so it is useful for local pipelines/debugging rather than a separate terminal notification service.
+- **`stdio`**: stdin ingestion and plain-text stdout output from `pi-personal-daemon send`; no Feishu receiver, card, reaction, or debounce. Output belongs to the send process's stdout, so it is useful for local pipelines/debugging rather than a separate terminal notification service.
 
 `stdin.enabled` remains an optional input source with either adapter. Feishu `eventMode` accepts `ws`, `webhook`, or both via the existing configuration. Real Feishu sending needs `sender.type=feishu` and app credentials. Webhook verification / encrypted payload handling remains in the Feishu receiver.
 
@@ -103,23 +106,23 @@ The static agent registry and capability contract are in `src/agents/`. Add a ba
 Bind the single visible destination:
 
 ```bash
-pi-personal bind destination --chat-id oc_xxx
+pi-personal-daemon bind destination --chat-id oc_xxx
 # Compatibility alias:
-pi-personal bind feishu-chat --chat-id oc_xxx
-pi-personal bind status
-pi-personal send '**hello** from markdown'
-printf 'longer reply' | pi-personal send --stdin
+pi-personal-daemon bind feishu-chat --chat-id oc_xxx
+pi-personal-daemon bind status
+pi-personal-daemon send '**hello** from markdown'
+printf 'longer reply' | pi-personal-daemon send --stdin
 ```
 
 The first real Feishu message auto-binds when no destination exists. Every visible reply uses the bound destination, not the latest callback's parent metadata. `stdio` can send without a prior binding.
 
-The daemon does not automatically forward final agent text. Prompts tell the agent to use `pi-personal send` for visible output. Feishu renders card JSON 2.0 markdown and a grey context occupancy footer. Send accounting updates the current SQLite context atomically; an event switch while the network send is in flight does not increment the new event's count.
+The daemon does not automatically forward final agent text. Prompts tell the agent to use `pi-personal-daemon send` for visible output. Feishu renders card JSON 2.0 markdown and a grey context occupancy footer. Send accounting updates the current SQLite context atomically; an event switch while the network send is in flight does not increment the new event's count.
 
 `return` is a separate path to the main agent:
 
 ```bash
-pi-personal return 'short result for main'
-printf 'longer report' | pi-personal return --stdin
+pi-personal-daemon return 'short result for main'
+printf 'longer report' | pi-personal-daemon return --stdin
 ```
 
 It needs parent metadata supplied by a session/cron launch or the surrounding Pi process. It does not send a visible chat message.
@@ -127,13 +130,13 @@ It needs parent metadata supplied by a session/cron launch or the surrounding Pi
 ## Sessions
 
 ```bash
-pi-personal sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
-pi-personal sessions send research-1 --message 'continue with Y' --wait
-pi-personal sessions create --agent other-harness --prompt 'run asynchronously' --no-return
-pi-personal sessions create --prompt 'run and return the result to main' --return
-pi-personal sessions list
-pi-personal sessions status research-1
-pi-personal sessions history research-1 --lines 80
+pi-personal-daemon sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
+pi-personal-daemon sessions send research-1 --message 'continue with Y' --wait
+pi-personal-daemon sessions create --agent other-harness --prompt 'run asynchronously' --no-return
+pi-personal-daemon sessions create --prompt 'run and return the result to main' --return
+pi-personal-daemon sessions list
+pi-personal-daemon sessions status research-1
+pi-personal-daemon sessions history research-1 --lines 80
 ```
 
 - Each record saves the session ID, agent selection/snapshot, working directory, status, run token, worker/supervisor PID, return settings, timestamps, last prompt/result, and log path.
@@ -142,7 +145,7 @@ pi-personal sessions history research-1 --lines 80
 - PID loss is failure/interruption, never proof of successful completion. A still-live worker, supervisor, or owned process group prevents accidental restart overlap. Unix timeout/cancellation terminates the owned group and confirms exit before releasing the run; pipe decoding preserves UTF-8 across chunks.
 - Duplicate explicit session IDs are rejected, not overwritten.
 - CLI `history` shows the daemon execution log; native backend history stays with the backend.
-- `--return` enables automatic return to main when a run finishes; `--no-return` disables it. The session record stores this choice as `autoReturn`. Explicit `pi-personal return` calls work independently of that switch. Creating or sending from a parent agent records return metadata regardless of the flag; sends without parent context retain the saved metadata. Previously affected sessions missing metadata regain it on their next send from the parent.
+- `--return` enables automatic return to main when a run finishes; `--no-return` disables it. The session record stores this choice as `autoReturn`. Explicit `pi-personal-daemon return` calls work independently of that switch. Creating or sending from a parent agent records return metadata regardless of the flag; sends without parent context retain the saved metadata. Previously affected sessions missing metadata regain it on their next send from the parent.
 - Without a flag, automatic return defaults on only if `PI_SESSION_ID` or `PI_SESSION_FILE` is present. Outside Pi it defaults off.
 
 Completion state and its requested callback are committed together in SQLite. Callback records are claimed one at a time when main actually begins delivery and acknowledged after agent processing; a waiting backlog does not consume retry attempts. A failed delivery is retried with a short backoff, up to three attempts. Interrupted claims recover on daemon startup; exhausted records remain failed for inspection. This provides bounded retry, **not exactly-once external side effects**. A crash after an agent acts but before acknowledgment can cause duplicate processing.
@@ -186,14 +189,14 @@ Supported fields: `minute hour day-of-month month day-of-week`; `*`, `*/n`, numb
 Persisted runtime schedules:
 
 ```bash
-pi-personal cron create --id hourly --cron '0 * * * *' --prompt 'Hourly wakeup' --target main
-pi-personal cron create --id one-shot --at '2026-11-01T09:30:00+08:00' --prompt 'One-shot task' --target new
-pi-personal cron create --id shadow --cron '0 */2 * * *' --prompt 'Heartbeat' --target session:research-1
-pi-personal cron list
-pi-personal cron status hourly
-pi-personal cron update hourly --prompt 'Updated prompt'
-pi-personal cron disable hourly
-pi-personal cron delete hourly
+pi-personal-daemon cron create --id hourly --cron '0 * * * *' --prompt 'Hourly wakeup' --target main
+pi-personal-daemon cron create --id one-shot --at '2026-11-01T09:30:00+08:00' --prompt 'One-shot task' --target new
+pi-personal-daemon cron create --id shadow --cron '0 */2 * * *' --prompt 'Heartbeat' --target session:research-1
+pi-personal-daemon cron list
+pi-personal-daemon cron status hourly
+pi-personal-daemon cron update hourly --prompt 'Updated prompt'
+pi-personal-daemon cron disable hourly
+pi-personal-daemon cron delete hourly
 ```
 
 - `main`: enqueue a wake into main.

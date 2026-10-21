@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "bin": {
-    "pi-personal": "./dist/cli.js",
     "pi-personal-daemon": "./dist/index.js"
   },
   "description": "Single-chat personal daemon with pluggable channel and agent adapters",

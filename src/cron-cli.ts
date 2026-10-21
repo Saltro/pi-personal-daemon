@@ -22,12 +22,12 @@ interface ParsedOptions {
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal cron create --id <id> --prompt <text>|--stdin (--cron <expr> | --at <time>) [--target main|new|session:<id>] [--target-session <id>] [--enabled|--disabled]
-  pi-personal cron list
-  pi-personal cron status <id>
-  pi-personal cron update <id> [--prompt <text>|--stdin] [--cron <expr>|--at <time>] [--target main|new|session:<id>] [--target-session <id>] [--enabled|--disabled]
-  pi-personal cron disable <id>
-  pi-personal cron delete <id>`);
+  pi-personal-daemon cron create --id <id> --prompt <text>|--stdin (--cron <expr> | --at <time>) [--target main|new|session:<id>] [--target-session <id>] [--enabled|--disabled]
+  pi-personal-daemon cron list
+  pi-personal-daemon cron status <id>
+  pi-personal-daemon cron update <id> [--prompt <text>|--stdin] [--cron <expr>|--at <time>] [--target main|new|session:<id>] [--target-session <id>] [--enabled|--disabled]
+  pi-personal-daemon cron disable <id>
+  pi-personal-daemon cron delete <id>`);
   process.exit(2);
 }
 

@@ -2,7 +2,7 @@ import { loadConfig } from './config.js';
 import { writeParentReturnNotification } from './session-callbacks.js';
 import { getSession, type ParentCallback } from './session-registry.js';
 
-export function returnUsage(command = 'pi-personal return'): never {
+export function returnUsage(command = 'pi-personal-daemon return'): never {
   console.error(`Usage: ${command} <text...> | --stdin`);
   process.exit(2);
 }
@@ -13,7 +13,7 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-export async function runReturnCli(args: string[], command = 'pi-personal return'): Promise<void> {
+export async function runReturnCli(args: string[], command = 'pi-personal-daemon return'): Promise<void> {
   let text: string;
   if (args.length === 1 && args[0] === '--stdin') {
     text = await readStdin();

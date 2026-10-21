@@ -61,7 +61,7 @@ assert.equal(readCurrentContext(stdioConfig).textChars, 'stdio ingress'.length);
 stdioDaemon.stop();
 const file = path.join(tmp, 'config.json');
 fs.writeFileSync(file, JSON.stringify(stdioConfig));
-const send = spawnSync(process.execPath, [path.resolve(import.meta.dirname, '../dist/cli.js'), 'send', 'stdio egress'], {
+const send = spawnSync(process.execPath, [path.resolve(import.meta.dirname, '../dist/index.js'), 'send', 'stdio egress'], {
   cwd: tmp, env: { ...process.env, PERSONAL_DAEMON_CONFIG: file }, encoding: 'utf8', timeout: 5000,
 });
 assert.equal(send.status, 0, send.stderr);

@@ -4,7 +4,6 @@ export default defineConfig({
   source: {
     entry: {
       index: './src/index.ts',
-      cli: './src/cli.ts',
       'session-watcher': './src/session-watcher.ts',
     },
   },

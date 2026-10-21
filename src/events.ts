@@ -135,8 +135,8 @@ function parseFeishuMessageText(message: FeishuMessage): string {
 }
 
 export function toAgentPrompt(event: InboundEvent, channelLabel = 'channel'): string {
-  const sendInstruction = `To send a visible ${channelLabel} reply, run: pi-personal send --stdin`;
-  const returnInstruction = 'To report back to the main agent session, run: pi-personal return --stdin';
+  const sendInstruction = `To send a visible ${channelLabel} reply, run: pi-personal-daemon send --stdin`;
+  const returnInstruction = 'To report back to the main agent session, run: pi-personal-daemon return --stdin';
   if (event.kind === 'wake') {
     return [sendInstruction, returnInstruction, '', event.text].filter(Boolean).join('\n');
   }

@@ -19,7 +19,7 @@ import type { AppConfig } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-daemon-'));
 const repoRoot = path.resolve(import.meta.dirname, '..');
-const cliPath = path.join(repoRoot, 'dist/cli.js');
+const cliPath = path.join(repoRoot, 'dist/index.js');
 const outbox = path.join(tmp, 'outbox.jsonl');
 const config: AppConfig = {
   agent: { sessionId: 'smoke', cwd: tmp, piBin: 'pi', extraArgs: [], mock: true },
@@ -130,7 +130,7 @@ assert.equal(JSON.parse(cli(['bind', 'status']).stdout).binding.chatId, 'oc-test
 await daemon.enqueue({ id: 'return-callback-smoke', source: 'session-callback', kind: 'wake', chatId: 'personal-agent-tryout', text: 'Child session completed.' });
 assert.equal(readCurrentContext(config).eventId, 'return-callback-smoke');
 assert.equal(readFeishuChatBinding(config)?.chatId, 'oc-test');
-cli(['send', '--stdin'], configPath, {}, '**hello** from `pi-personal send`\n- list item with `inline code`');
+cli(['send', '--stdin'], configPath, {}, '**hello** from `pi-personal-daemon send`\n- list item with `inline code`');
 const sent = jsonl(outbox)[2];
 assert.equal(sent.chatId, 'oc-test');
 assert.equal(sent.inReplyTo, 'return-callback-smoke');
@@ -138,7 +138,7 @@ assert.equal(sent.contextFooter, 'Context usage unavailable');
 assert.equal(sent.msgType, 'interactive');
 assert.equal(sent.card.schema, '2.0');
 assert.equal(sent.card.config.width_mode, 'fill');
-assert.equal(sent.card.body.elements[0].content, '**hello** from `pi-personal send`\n- list item with `inline code`');
+assert.equal(sent.card.body.elements[0].content, '**hello** from `pi-personal-daemon send`\n- list item with `inline code`');
 assert.match(sent.card.body.elements[2].content, /<font color="grey"><font size="small">Context usage unavailable/);
 assert.equal(readCurrentContext(config).sendCount, 1);
 

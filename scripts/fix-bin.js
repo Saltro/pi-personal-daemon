@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const shebang = '#!/usr/bin/env node\n';
-for (const file of ['dist/index.js', 'dist/cli.js', 'dist/session-watcher.js']) {
+for (const file of ['dist/index.js', 'dist/session-watcher.js']) {
   let content = fs.readFileSync(file, 'utf8');
   if (!content.startsWith(shebang)) {
     content = shebang + content;
@@ -9,5 +9,5 @@ for (const file of ['dist/index.js', 'dist/cli.js', 'dist/session-watcher.js']) 
   }
   fs.chmodSync(file, 0o755);
 }
-fs.copyFileSync('dist/cli.js', 'dist/pi-personal');
-fs.chmodSync('dist/pi-personal', 0o755);
+fs.copyFileSync('dist/index.js', 'dist/pi-personal-daemon');
+fs.chmodSync('dist/pi-personal-daemon', 0o755);
