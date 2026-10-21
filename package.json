@@ -7,14 +7,16 @@
     "pi-personal": "./dist/cli.js",
     "pi-personal-daemon": "./dist/index.js"
   },
-  "description": "Minimal single-agent Feishu to Pi daemon prototype",
+  "description": "Single-chat personal daemon with pluggable channel and agent adapters",
   "packageManager": "pnpm@10.34.4",
   "scripts": {
     "build": "rsbuild build && node scripts/fix-bin.js",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "smoke": "tsx test/smoke.ts"
+    "smoke": "tsx test/smoke.ts",
+    "test": "pnpm run typecheck && pnpm run build && pnpm run test:unit && pnpm run smoke",
+    "test:unit": "tsx test/storage.ts && tsx test/runner.ts && tsx test/scheduler.ts && tsx test/agents.ts && tsx test/sessions.ts && tsx test/channels.ts"
   },
   "engines": {
     "node": ">=22.13.0"

@@ -134,14 +134,14 @@ function parseFeishuMessageText(message: FeishuMessage): string {
   return JSON.stringify(message.content ?? message);
 }
 
-export function toPiPrompt(event: InboundEvent): string {
-  const sendInstruction = 'To send a visible Feishu reply, run: pi-personal send --stdin';
-  const returnInstruction = 'To report back to the parent/main Pi session, run: pi-personal return --stdin';
+export function toAgentPrompt(event: InboundEvent, channelLabel = 'channel'): string {
+  const sendInstruction = `To send a visible ${channelLabel} reply, run: pi-personal send --stdin`;
+  const returnInstruction = 'To report back to the main agent session, run: pi-personal return --stdin';
   if (event.kind === 'wake') {
     return [sendInstruction, returnInstruction, '', event.text].filter(Boolean).join('\n');
   }
   return [
-    'Feishu inbound message',
+    `${channelLabel} inbound message`,
     `source=${event.source}`,
     `event_id=${event.id}`,
     `chat_id=${event.chatId}`,
@@ -152,4 +152,8 @@ export function toPiPrompt(event: InboundEvent): string {
     '',
     event.text,
   ].filter(Boolean).join('\n');
+}
+
+export function toPiPrompt(event: InboundEvent): string {
+  return toAgentPrompt(event, 'Feishu');
 }

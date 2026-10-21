@@ -1,16 +1,19 @@
-import { toPiPrompt } from './events.js';
-import { ensureFeishuChatBinding, readFeishuChatBinding } from './feishu-binding.js';
-import { drainParentNotifications, noticeToInbound } from './session-callbacks.js';
-import { PiRpcRunner } from './pi-runner.js';
-import { createSender } from './sender.js';
+import { toAgentPrompt } from './events.js';
+import { createChannelAdapter, type ChannelAdapter } from './channels.js';
+import { acknowledgeParentNotification, claimParentNotifications, noticeToInbound, recoverParentNotifications, releaseParentNotification } from './session-callbacks.js';
+import { createMainAgentRunner, type AgentRunner } from './agents/index.js';
 import { readCurrentContext, recordContextUsage, writeCurrentContext } from './runtime-context.js';
 import { RuntimeCronDispatcher } from './runtime-cron-dispatch.js';
-import { startHttpReceiver, startStdinReceiver } from './receivers.js';
+import { startStdinReceiver } from './receivers.js';
 import { WakeupScheduler } from './scheduler.js';
-import { startFeishuWsReceiver } from './feishu-ws.js';
 import type { Interface } from 'node:readline';
-import type { Server } from 'node:http';
-import type { AppConfig, InboundEvent, Sender } from './types.js';
+import type { AppConfig, InboundEvent } from './types.js';
+
+export interface DaemonOptions {
+  runner?: AgentRunner;
+  channel?: ChannelAdapter;
+  debounceMs?: number;
+}
 
 const DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
 const DEDUPE_MAX_KEYS = 1000;
@@ -19,38 +22,33 @@ const COMPLETION_REACTION = 'DONE';
 const USER_MESSAGE_DEBOUNCE_MS = 10_000;
 
 export class PersonalDaemon {
-  private runner: PiRpcRunner;
-  private sender: Sender;
+  private runner: AgentRunner;
+  private channel: ChannelAdapter;
   private queue: Promise<void> = Promise.resolve();
-  private httpServer: Server | null = null;
+  private stopped = false;
+  private callbacksRecovered = false;
+  private callbackDeliveryScheduled = false;
+  private debounceMs: number;
   private stdinReceiver: Interface | null = null;
   private scheduler: WakeupScheduler;
   private runtimeCron: RuntimeCronDispatcher;
-  private feishuWs: { close(params?: { force?: boolean }): void; getConnectionStatus?: () => unknown } | null = null;
   private callbackPoller: NodeJS.Timeout | null = null;
   private seenInbound = new Map<string, number>();
   private debounceTimer: NodeJS.Timeout | null = null;
   private debouncedMessages: Array<{ event: InboundEvent; dedupeKey: string | null }> = [];
 
-  constructor(private config: AppConfig) {
-    this.runner = new PiRpcRunner(config);
-    this.sender = createSender(config);
+  constructor(private config: AppConfig, options: DaemonOptions = {}) {
+    this.runner = options.runner || createMainAgentRunner(config);
+    this.channel = options.channel || createChannelAdapter(config);
+    this.debounceMs = options.debounceMs ?? USER_MESSAGE_DEBOUNCE_MS;
     this.scheduler = new WakeupScheduler(config, event => this.enqueue(event));
     this.runtimeCron = new RuntimeCronDispatcher(config, event => this.enqueue(event));
   }
 
   start(): void {
     this.runner.start();
-    if (this.config.feishu.eventMode !== 'ws') {
-      this.httpServer = startHttpReceiver(this.config, event => this.enqueue(event));
-    }
-    if (this.config.feishu.eventMode !== 'webhook') {
-      startFeishuWsReceiver(this.config, event => this.enqueue(event))
-        .then(client => {
-          this.feishuWs = client;
-        })
-        .catch(error => console.error(`[feishu-ws] ${error.stack || error}`));
-    }
+    this.channel.start(event => this.enqueue(event))
+      .catch(error => console.error(`[channel] ${error.stack || error}`));
     this.stdinReceiver = startStdinReceiver(this.config, event => this.enqueue(event));
     this.scheduler.start();
     this.runtimeCron.start();
@@ -58,6 +56,7 @@ export class PersonalDaemon {
   }
 
   enqueue(event: InboundEvent): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error('Daemon is stopped'));
     if (event.source !== 'session-callback') this.deliverCallbackNotifications();
     const dedupeKey = this.dedupeKey(event);
     if (dedupeKey && this.isDuplicate(dedupeKey)) {
@@ -68,26 +67,30 @@ export class PersonalDaemon {
       this.debounceUserMessage(event, dedupeKey);
       return this.queue;
     }
-    this.enqueueImmediate(event, dedupeKey);
-    return this.queue;
+    return this.enqueueImmediate(event, dedupeKey);
   }
 
-  private enqueueImmediate(event: InboundEvent, dedupeKeys: string | string[] | null = null): void {
+  private enqueueImmediate(event: InboundEvent, dedupeKeys: string | string[] | null = null): Promise<void> {
     const keys = Array.isArray(dedupeKeys) ? dedupeKeys : dedupeKeys ? [dedupeKeys] : [];
-    this.queue = this.queue.then(() => this.handleEvent(event)).catch(error => {
+    const task = this.queue.then(async () => {
+      if (this.stopped) throw new Error('Daemon stopped before event delivery');
+      await this.handleEvent(event);
+    });
+    this.queue = task.catch(error => {
       for (const key of keys) this.seenInbound.delete(key);
       console.error(`[daemon] ${error.stack || error}`);
     });
+    return task;
   }
 
   private shouldDebounce(event: InboundEvent): boolean {
-    return event.kind === 'message' && event.source.includes('feishu');
+    return this.channel.shouldDebounce(event);
   }
 
   private debounceUserMessage(event: InboundEvent, dedupeKey: string | null): void {
     this.debouncedMessages.push({ event, dedupeKey });
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => this.flushDebouncedMessages(), USER_MESSAGE_DEBOUNCE_MS);
+    this.debounceTimer = setTimeout(() => this.flushDebouncedMessages(), this.debounceMs);
     console.error(`[daemon] message debounced event=${event.id} batch_size=${this.debouncedMessages.length}`);
   }
 
@@ -97,7 +100,7 @@ export class PersonalDaemon {
     if (!batch.length) return;
     const event = aggregateInboundMessages(batch.map(item => item.event));
     const dedupeKeys = batch.map(item => item.dedupeKey).filter((key): key is string => !!key);
-    if (this.runner.isRunning()) {
+    if (this.runner.isRunning() && this.runner.capabilities.steer) {
       this.steerActiveRun(event).catch(error => {
         for (const key of dedupeKeys) this.seenInbound.delete(key);
         console.error(`[daemon] steer failed event=${event.id}: ${error instanceof Error ? error.message : String(error)}`);
@@ -110,10 +113,10 @@ export class PersonalDaemon {
 
   private async steerActiveRun(event: InboundEvent): Promise<void> {
     console.error(`[daemon] prompt steer event=${event.id} text_chars=${event.text.length}`);
-    this.bindFeishuChat(event);
+    this.channel.bindInbound(event);
     await this.addReaction(event, PROCESSING_REACTION, 'processing');
     writeCurrentContext(this.config, event);
-    const response = await this.runner.steer(toPiPrompt(event));
+    const response = await this.runner.steer(toAgentPrompt(event, this.channel.label));
     console.error(`[daemon] prompt steered event=${event.id} disposition=${response.disposition}`);
     this.runner.waitForSettled().then(async () => {
       await this.refreshContextUsage(event.id);
@@ -127,11 +130,11 @@ export class PersonalDaemon {
   async handleEvent(event: InboundEvent): Promise<void> {
     if (!event.text?.trim()) return;
     console.error(`[daemon] event ${event.id} kind=${event.kind} chat=${event.chatId} text_chars=${event.text.length}`);
-    this.bindFeishuChat(event);
+    this.channel.bindInbound(event);
     await this.addReaction(event, PROCESSING_REACTION, 'processing');
     writeCurrentContext(this.config, event);
     await this.refreshContextUsage(event.id);
-    const prompt = toPiPrompt(event);
+    const prompt = toAgentPrompt(event, this.channel.label);
     console.error(`[daemon] prompt start event=${event.id}`);
     await this.runner.promptAndWait(prompt);
     await this.refreshContextUsage(event.id);
@@ -144,27 +147,19 @@ export class PersonalDaemon {
   private async refreshContextUsage(eventId: string): Promise<void> {
     try {
       const usage = await this.runner.getContextUsage();
-      recordContextUsage(this.config, usage);
+      recordContextUsage(this.config, usage, eventId);
       console.error(`[daemon] context usage event=${eventId} value=${JSON.stringify(usage.text)} source=${usage.source}`);
     } catch (error) {
       console.error(`[daemon] context usage warning event=${eventId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  private bindFeishuChat(event: InboundEvent): void {
-    if (event.kind !== 'message' || !event.messageId || !event.chatId) return;
-    if (!event.source.includes('feishu')) return;
-    if (readFeishuChatBinding(this.config)) return;
-    ensureFeishuChatBinding(this.config, event.chatId, 'auto');
-    console.error(`[daemon] feishu chat bound chat=${event.chatId}`);
-  }
-
   private async addReaction(event: InboundEvent, emojiType: string, phase: string): Promise<void> {
-    if (!this.sender.addReaction) return;
+    if (!this.channel.sender.addReaction) return;
     const messageIds = reactionMessageIds(event);
     for (const messageId of messageIds) {
       try {
-        await this.sender.addReaction(messageId, emojiType);
+        await this.channel.sender.addReaction(messageId, emojiType);
         console.error(`[daemon] reaction ok event=${event.id} message=${messageId} emoji=${emojiType} phase=${phase}`);
       } catch (error) {
         console.error(`[daemon] reaction warning event=${event.id} message=${messageId} emoji=${emojiType} phase=${phase}: ${error instanceof Error ? error.message : String(error)}`);
@@ -178,15 +173,33 @@ export class PersonalDaemon {
   }
 
   private deliverCallbackNotifications(): void {
-    for (const notice of drainParentNotifications(this.config)) {
-      this.enqueue(noticeToInbound(notice));
+    if (this.stopped || this.callbackDeliveryScheduled) return;
+    if (!this.callbacksRecovered) {
+      recoverParentNotifications(this.config);
+      this.callbacksRecovered = true;
     }
+    this.callbackDeliveryScheduled = true;
+    const task = this.queue.then(async () => {
+      while (!this.stopped) {
+        // Claim only when main is ready, so a waiting backlog consumes no retry attempts.
+        const [notice] = claimParentNotifications(this.config, 1);
+        if (!notice) break;
+        try {
+          await this.handleEvent(noticeToInbound(notice));
+          acknowledgeParentNotification(this.config, notice.id);
+        } catch (error) {
+          try { releaseParentNotification(this.config, notice.id); }
+          catch (releaseError) { console.error(`[session-callback] release failed: ${releaseError}`); }
+          console.error(`[daemon] ${error instanceof Error ? error.stack || error.message : error}`);
+        }
+      }
+    });
+    this.queue = task.catch(error => console.error(`[session-callback] ${error}`))
+      .finally(() => { this.callbackDeliveryScheduled = false; });
   }
 
   private dedupeKey(event: InboundEvent): string | null {
-    if (event.kind !== 'message') return null;
-    if (event.source.includes('feishu') || event.messageId) return event.messageId ? `message:${event.messageId}` : `event:${event.id}`;
-    return null;
+    return this.channel.dedupeKey(event);
   }
 
   private isDuplicate(key: string): boolean {
@@ -212,13 +225,13 @@ export class PersonalDaemon {
   }
 
   stop(): void {
+    this.stopped = true;
     this.scheduler.stop();
     this.runtimeCron.stop();
     if (this.callbackPoller) clearInterval(this.callbackPoller);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    if (this.debouncedMessages.length) this.flushDebouncedMessages();
-    this.feishuWs?.close({ force: true });
-    this.httpServer?.close();
+    this.debouncedMessages = [];
+    this.channel.close();
     this.stdinReceiver?.close();
     this.runner.close();
   }
@@ -238,7 +251,7 @@ function aggregateInboundMessages(events: InboundEvent[]): InboundEvent {
   const first = events[0];
   const last = events[events.length - 1];
   const lines = [
-    `Aggregated ${events.length} Feishu inbound messages in receive order.`,
+    `Aggregated ${events.length} inbound messages in receive order.`,
     ...events.flatMap((event, index) => [
       '',
       `Message ${index + 1}:`,

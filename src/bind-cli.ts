@@ -3,6 +3,7 @@ import { bindingPath, readFeishuChatBinding, writeFeishuChatBinding } from './fe
 
 function usage(): never {
   console.error(`Usage:
+  pi-personal bind destination --chat-id <chat_id>
   pi-personal bind feishu-chat --chat-id <chat_id>
   pi-personal bind status`);
   process.exit(2);
@@ -17,7 +18,7 @@ function needValue(args: string[], index: number, flag: string): string {
 export async function runBindCli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
   const config = loadConfig();
-  if (command === 'feishu-chat') {
+  if (command === 'feishu-chat' || command === 'destination') {
     let chatId: string | undefined;
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];

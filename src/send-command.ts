@@ -1,6 +1,6 @@
 import { loadConfig } from './config.js';
-import { readFeishuChatBinding } from './feishu-binding.js';
-import { createSender } from './sender.js';
+import { readOutputBinding } from './output-binding.js';
+import { createChannelAdapter } from './channels.js';
 import { readCurrentContext, recordContextSend } from './runtime-context.js';
 
 export function sendUsage(command = 'pi-personal send'): never {
@@ -28,20 +28,26 @@ export async function runSendCli(args: string[], command = 'pi-personal send'): 
   if (!text) sendUsage(command);
 
   const config = loadConfig();
-  const binding = readFeishuChatBinding(config);
-  if (!binding) throw new Error('Feishu chat is not bound. Run: pi-personal bind feishu-chat --chat-id <chat_id>');
+  const channel = createChannelAdapter(config);
+  const binding = readOutputBinding(config);
+  if (!binding && channel.type !== 'stdio') throw new Error('Output destination is not bound. Run: pi-personal bind destination --chat-id <chat_id>');
+  const chatId = binding?.chatId || 'stdio';
   const context = tryReadCurrentContext(config);
-  await createSender(config).send({
-    chatId: binding.chatId,
+  await channel.sender.send({
+    chatId,
     inReplyTo: context?.eventId || 'manual',
     text,
     contextFooter: context?.contextUsage,
   });
   if (context) {
-    const updated = recordContextSend(config);
-    console.error(`[${command}] sent event=${updated.eventId} chat=${binding.chatId} count=${updated.sendCount}`);
+    try {
+      const updated = recordContextSend(config, context.eventId);
+      console.error(`[${command}] sent event=${updated.eventId} chat=${chatId} count=${updated.sendCount}`);
+    } catch (error) {
+      console.error(`[${command}] sent event=${context.eventId} chat=${chatId}; context accounting warning: ${error instanceof Error ? error.message : String(error)}`);
+    }
   } else {
-    console.error(`[${command}] sent event=manual chat=${binding.chatId}`);
+    console.error(`[${command}] sent event=manual chat=${chatId}`);
   }
 }
 
