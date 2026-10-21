@@ -11,7 +11,7 @@ logs/
 outbox.jsonl
 session-callback-queue.jsonl
 current-context.json
-state/
+/state/
 .cache/
 cache/
 
