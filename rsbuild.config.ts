@@ -4,7 +4,6 @@ export default defineConfig({
   source: {
     entry: {
       index: './src/index.ts',
-      cli: './src/cli.ts',
       'session-watcher': './src/session-watcher.ts',
     },
   },
@@ -22,6 +21,8 @@ export default defineConfig({
     rspack: {
       externalsPresets: { node: true },
       externals: ['@larksuiteoapi/node-sdk'],
+      // Each entry is deployed as a standalone file; the daemon and the supervisor must not depend on shared chunks.
+      optimization: { splitChunks: false },
     },
   },
 });

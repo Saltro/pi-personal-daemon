@@ -10,6 +10,7 @@ const DEFAULT_CONFIG: AppConfig = {
     extraArgs: [],
     mock: false,
   },
+  channel: { type: 'feishu' },
   http: {
     enabled: true,
     host: '127.0.0.1',
@@ -57,7 +58,7 @@ function boolEnv(value: string | undefined, fallback: boolean): boolean {
 }
 
 export function loadConfig(): AppConfig {
-  const configPath = process.env.PERSONAL_DAEMON_CONFIG || path.join(process.cwd(), 'config.json');
+  const configPath = path.resolve(process.env.PERSONAL_DAEMON_CONFIG || path.join(process.cwd(), 'config.json'));
   let fileConfig: Partial<AppConfig> = {};
   if (fs.existsSync(configPath)) {
     fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Partial<AppConfig>;
@@ -71,7 +72,9 @@ export function loadConfig(): AppConfig {
       sessionDir: process.env.PI_DAEMON_SESSION_DIR,
       extraArgs: process.env.PI_DAEMON_EXTRA_ARGS ? process.env.PI_DAEMON_EXTRA_ARGS.split(' ').filter(Boolean) : undefined,
       mock: process.env.PI_DAEMON_MOCK ? boolEnv(process.env.PI_DAEMON_MOCK, false) : undefined,
+      profile: process.env.PI_DAEMON_AGENT_PROFILE,
     },
+    channel: { type: process.env.PI_DAEMON_CHANNEL },
     http: {
       enabled: process.env.PI_DAEMON_HTTP_ENABLED ? boolEnv(process.env.PI_DAEMON_HTTP_ENABLED, true) : undefined,
       host: process.env.PI_DAEMON_HTTP_HOST,
@@ -102,7 +105,22 @@ export function loadConfig(): AppConfig {
     },
   };
 
-  return mergeConfig(mergeConfig(DEFAULT_CONFIG, fileConfig), stripUndefined(envConfig) as Partial<AppConfig>);
+  const config = mergeConfig(mergeConfig(DEFAULT_CONFIG, fileConfig), stripUndefined(envConfig) as Partial<AppConfig>);
+  const baseDir = path.dirname(configPath);
+  config.runtime.configPath = configPath;
+  config.agent.cwd = path.resolve(baseDir, config.agent.cwd);
+  if (config.agent.sessionDir) config.agent.sessionDir = path.resolve(baseDir, config.agent.sessionDir);
+  if (config.agent.piBin.includes(path.sep)) config.agent.piBin = path.resolve(baseDir, config.agent.piBin);
+  if (config.runtime.stateDir) config.runtime.stateDir = path.resolve(baseDir, config.runtime.stateDir);
+  if (config.runtime.contextFile) config.runtime.contextFile = path.resolve(baseDir, config.runtime.contextFile);
+  config.sender.mockOutbox = path.resolve(baseDir, config.sender.mockOutbox);
+  for (const profile of Object.values(config.agentProfiles || {})) {
+    if (profile.cwd) profile.cwd = path.resolve(baseDir, profile.cwd);
+    if (profile.sessionDir) profile.sessionDir = path.resolve(baseDir, profile.sessionDir);
+    if (profile.backend === 'pi' && profile.piBin?.includes(path.sep)) profile.piBin = path.resolve(baseDir, profile.piBin);
+    if (profile.backend === 'process' && profile.command?.includes(path.sep)) profile.command = path.resolve(baseDir, profile.command);
+  }
+  return config;
 }
 
 function stripUndefined(value: unknown): unknown {

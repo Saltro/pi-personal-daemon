@@ -1,12 +1,30 @@
 {
   "agent": {
     "sessionId": "personal-agent",
-    "cwd": "/data00/home/fengzhiyang.ping",
+    "cwd": "/tmp/pi-personal-daemon-workspace",
     "piBin": "pi",
-    "extraArgs": [
-      "--no-approve"
-    ],
+    "extraArgs": ["--no-approve"],
     "mock": false
+  },
+  "channel": {
+    "type": "feishu"
+  },
+  "agentProfiles": {
+    "research": {
+      "backend": "pi",
+      "piBin": "pi",
+      "extraArgs": [],
+      "commandTimeoutMs": 30000,
+      "cwd": "/path/to/research-workspace"
+    },
+    "local-cli": {
+      "backend": "process",
+      "command": "/path/to/agent-cli",
+      "args": [],
+      "promptMode": "stdin",
+      "timeoutMs": 600000,
+      "cwd": "/path/to/workspace"
+    }
   },
   "http": {
     "enabled": true,
@@ -19,7 +37,7 @@
   },
   "sender": {
     "type": "mock",
-    "mockOutbox": "/data00/home/fengzhiyang.ping/pi-personal-daemon/outbox.jsonl"
+    "mockOutbox": "/tmp/pi-personal-daemon-workspace/pi-personal-daemon/outbox.jsonl"
   },
   "feishu": {
     "appId": "",
@@ -31,7 +49,7 @@
   },
   "runtime": {
     "contextFile": "/tmp/pi-personal-daemon-current-context.json",
-    "stateDir": "/data00/home/fengzhiyang.ping/.cache/pi-personal-daemon"
+    "stateDir": "/tmp/pi-personal-daemon-workspace/.cache/pi-personal-daemon"
   },
   "scheduler": {
     "enabled": true,
@@ -54,7 +72,7 @@
     ]
   },
   "runtimeCronExamples": [
-    "pi-personal cron create --id hourly-note --cron '0 * * * *' --prompt 'Hourly wakeup' --target main",
-    "pi-personal cron create --id one-shot --at '2026-10-21T09:30:00+08:00' --prompt 'One-shot wakeup' --target new"
+    "pi-personal-daemon cron create --id hourly-note --cron '0 * * * *' --prompt 'Hourly wakeup' --target main",
+    "pi-personal-daemon cron create --id one-shot --at '2026-10-21T09:30:00+08:00' --prompt 'One-shot wakeup' --target new"
   ]
 }

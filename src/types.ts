@@ -5,11 +5,43 @@ export interface AgentConfig {
   sessionDir?: string;
   extraArgs: string[];
   mock: boolean;
+  profile?: string;
+  commandTimeoutMs?: number;
 }
+
+interface AgentProfileBase {
+  cwd?: string;
+  sessionDir?: string;
+}
+
+export interface PiAgentProfile extends AgentProfileBase {
+  backend: 'pi';
+  piBin?: string;
+  extraArgs?: string[];
+  commandTimeoutMs?: number;
+}
+
+export interface MockAgentProfile extends AgentProfileBase {
+  backend: 'mock';
+  replyPrefix?: string;
+}
+
+/** A plain-text process, not a Pi RPC/print-compatible executable. */
+export interface ProcessAgentProfile extends AgentProfileBase {
+  backend: 'process';
+  command: string;
+  args?: string[];
+  promptMode?: 'stdin' | 'argument';
+  timeoutMs?: number;
+  env?: Record<string, string>;
+}
+
+export type AgentProfile = PiAgentProfile | MockAgentProfile | ProcessAgentProfile;
 
 export interface RuntimeConfig {
   contextFile?: string;
   stateDir?: string;
+  configPath?: string;
 }
 
 export interface HttpConfig {
@@ -53,6 +85,8 @@ export interface SchedulerConfig {
 
 export interface AppConfig {
   agent: AgentConfig;
+  agentProfiles?: Record<string, AgentProfile>;
+  channel?: { type: string };
   http: HttpConfig;
   stdin: StdinConfig;
   sender: SenderConfig;
