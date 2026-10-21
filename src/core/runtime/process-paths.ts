@@ -36,6 +36,17 @@ export function sessionWatcherCommand(): { args: string[] } {
   throw new Error(`session watcher not found: ${built}; build the package before running sessions`);
 }
 
+/** Re-run this entry point, including the tsx loader when running from source. */
+export function selfCommand(args: string[]): { command: string; args: string[] } {
+  const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : undefined;
+  if (!entry) throw new Error('cannot locate the daemon entry point');
+  if (entry.endsWith('.ts')) {
+    const loader = path.join(packageRoot, 'node_modules/tsx/dist/loader.mjs');
+    if (fs.existsSync(loader)) return { command: process.execPath, args: ['--import', loader, entry, ...args] };
+  }
+  return { command: process.execPath, args: [...process.execArgv, entry, ...args] };
+}
+
 export function absoluteConfigPath(config: AppConfig): string {
   return path.resolve(config.runtime.configPath || process.env.PERSONAL_DAEMON_CONFIG || 'config.json');
 }

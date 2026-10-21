@@ -27,6 +27,19 @@ pi-personal-daemon --help
 pnpm run dev
 ```
 
+### Daemon lifecycle
+
+Running `pi-personal-daemon` with no arguments stays in the foreground and logs to stderr. For a detached daemon:
+
+```bash
+pi-personal-daemon daemon start
+pi-personal-daemon daemon status
+pi-personal-daemon daemon restart
+pi-personal-daemon daemon stop
+```
+
+The pid file and background log live in `runtime.stateDir` (`daemon.pid`, `daemon.log`), so each state directory is managed independently. `start` refuses to run when a live pid already exists; `status` prints JSON and exits 1 when the daemon is not running. A pid file whose process is gone is reported as `stalePid` and removed by the next `status`, `restart`, or `stop`. Stopping sends `SIGTERM` and waits up to ten seconds for exit; it reports the log path instead of escalating to `SIGKILL`.
+
 Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes an executable `dist/pi-personal-daemon` helper. Running `pi-personal-daemon` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, and `cron` run their subcommands and exit. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
 
 ## Configuration
