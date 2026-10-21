@@ -1,5 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
 import readline from 'node:readline';
+import { agentProcessEnv } from './process-paths.js';
+import { agentProcessDetached, signalAgentProcess, waitForAgentProcessExit } from './process-control.js';
 import type { AgentConfig, AppConfig } from './types.js';
 
 interface RpcResponse<T = unknown> {
@@ -22,6 +24,15 @@ interface LastAssistantTextResponse {
 interface PendingCommand {
   resolve: (data: unknown) => void;
   reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
+export interface PiRpcRunnerOptions {
+  commandTimeoutMs?: number;
+  settledTimeoutMs?: number;
+  spawn?: (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
+  signalProcess?: (child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) => boolean;
+  confirmExit?: (child: ChildProcessWithoutNullStreams) => boolean | Promise<boolean>;
 }
 
 export interface PiContextUsage {
@@ -38,23 +49,45 @@ interface UsageCandidate {
 interface Waiter {
   resolve: () => void;
   reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
+interface RpcProcess {
+  child: ChildProcessWithoutNullStreams;
+  reader: readline.Interface;
+  pending: Map<string, PendingCommand>;
+  waiters: Set<Waiter>;
+  lastAssistantText: string;
+  running: boolean;
+  error: Error | null;
+  terminationSignaled: boolean;
+  verifyingExit: boolean;
 }
 
 export class PiRpcRunner {
   private config: AgentConfig;
-  private proc: ChildProcessWithoutNullStreams | null = null;
+  private proc: RpcProcess | null = null;
   private nextId = 1;
-  private pending = new Map<string, PendingCommand>();
-  private waiters: Waiter[] = [];
   private lastAssistantText = '';
-  private running = false;
+  private lastProcessError: Error | null = null;
+  private commandTimeoutMs: number;
+  private settledTimeoutMs: number;
+  private spawnProcess: NonNullable<PiRpcRunnerOptions['spawn']>;
+  private signalProcess: NonNullable<PiRpcRunnerOptions['signalProcess']>;
+  private confirmExit: NonNullable<PiRpcRunnerOptions['confirmExit']>;
 
-  constructor(config: AppConfig) {
-    this.config = config.agent;
+  constructor(private appConfig: AppConfig, options: PiRpcRunnerOptions = {}) {
+    this.config = appConfig.agent;
+    this.commandTimeoutMs = options.commandTimeoutMs ?? 30_000;
+    this.settledTimeoutMs = options.settledTimeoutMs ?? 10 * 60 * 1000;
+    this.spawnProcess = options.spawn ?? spawn;
+    this.signalProcess = options.signalProcess ?? signalAgentProcess;
+    this.confirmExit = options.confirmExit ?? waitForAgentProcessExit;
   }
 
   start(): void {
     if (this.config.mock) return;
+    if (this.proc?.error) throw new Error('pi rpc process is stopping');
     if (this.proc) return;
     const args = [
       '--mode', 'rpc',
@@ -62,29 +95,79 @@ export class PiRpcRunner {
       ...(this.config.sessionDir ? ['--session-dir', this.config.sessionDir] : []),
       ...(this.config.extraArgs || []),
     ];
-    this.proc = spawn(this.config.piBin, args, {
+    const child = this.spawnProcess(this.config.piBin, args, {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PERSONAL_DAEMON_CONFIG: process.env.PERSONAL_DAEMON_CONFIG || `${process.cwd()}/config.json`,
-        PATH: `${process.cwd()}/dist:${process.env.PATH || ''}`,
-      },
+      detached: agentProcessDetached,
+      env: agentProcessEnv(this.appConfig),
     });
-    this.proc.stderr.on('data', chunk => process.stderr.write(`[pi] ${chunk}`));
-    this.proc.on('exit', (code, signal) => {
-      const err = new Error(`pi rpc exited code=${code} signal=${signal}`);
-      for (const pending of this.pending.values()) pending.reject(err);
-      this.pending.clear();
-      this.proc = null;
+    const reader = readline.createInterface({ input: child.stdout });
+    const proc: RpcProcess = {
+      child, reader, pending: new Map(), waiters: new Set(), lastAssistantText: '', running: false, error: null,
+      terminationSignaled: false, verifyingExit: false,
+    };
+    this.proc = proc;
+    this.lastProcessError = null;
+    child.stderr.on('data', chunk => {
+      if (this.proc === proc && !proc.error) process.stderr.write(`[pi] ${chunk}`);
     });
-
-    const rl = readline.createInterface({ input: this.proc.stdout });
-    rl.on('line', line => this.handleRecordLine(line));
+    child.on('error', error => this.finishProcess(proc, error));
+    child.on('exit', (code, signal) => this.finishProcess(proc, new Error(`pi rpc exited code=${code} signal=${signal}`)));
+    child.on('close', (code, signal) => this.finishProcess(proc, new Error(`pi rpc closed code=${code} signal=${signal}`), true));
+    child.stdin.on('error', error => this.finishProcess(proc, error));
+    child.stdin.on('close', () => this.finishProcess(proc, new Error('pi rpc stdin closed')));
+    child.stdout.on('error', error => this.finishProcess(proc, error));
+    child.stderr.on('error', error => this.finishProcess(proc, error));
+    reader.on('line', line => this.handleRecordLine(proc, line));
+    reader.on('error', error => this.finishProcess(proc, error));
   }
 
-  private handleRecordLine(line: string): void {
-    if (!line.trim()) return;
+  private finishProcess(proc: RpcProcess, error: Error, closed = false): void {
+    if (!proc.error) {
+      proc.error = error;
+      if (this.proc === proc) this.lastProcessError = error;
+      proc.running = false;
+      proc.reader.close();
+      for (const pending of proc.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(error);
+      }
+      proc.pending.clear();
+      for (const waiter of proc.waiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(error);
+      }
+      proc.waiters.clear();
+      // A leader exit can leave descendants executing, even without RPC pipes.
+      // Signal the owned group; close and verified group exit gate replacement.
+      try {
+        proc.terminationSignaled = proc.child.pid == null || this.signalProcess(proc.child, 'SIGKILL');
+      } catch (killError) {
+        console.error(`[pi-rpc] failed to terminate: ${killError instanceof Error ? killError.message : String(killError)}`);
+      }
+    }
+    if ((closed || proc.child.pid == null) && proc.terminationSignaled && !proc.verifyingExit && this.proc === proc) {
+      proc.verifyingExit = true;
+      const release = (exited: boolean) => {
+        if (exited && this.proc === proc) this.proc = null;
+      };
+      try {
+        const exited = proc.child.pid == null || this.confirmExit(proc.child);
+        if (typeof exited === 'boolean') release(exited);
+        else exited.then(release).catch(error => console.error(`[pi-rpc] failed to confirm exit: ${error instanceof Error ? error.message : String(error)}`));
+      } catch (error) {
+        console.error(`[pi-rpc] failed to confirm exit: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  private assertProcess(proc: RpcProcess): void {
+    if (proc.error) throw proc.error;
+    if (this.proc !== proc) throw new Error('pi rpc process changed');
+  }
+
+  private handleRecordLine(proc: RpcProcess, line: string): void {
+    if (this.proc !== proc || proc.error || !line.trim()) return;
     let record: Record<string, unknown>;
     try {
       record = JSON.parse(line) as Record<string, unknown>;
@@ -93,76 +176,106 @@ export class PiRpcRunner {
       return;
     }
 
-    if (record.type === 'response' && typeof record.id === 'string' && this.pending.has(record.id)) {
+    if (record.type === 'response' && typeof record.id === 'string' && proc.pending.has(record.id)) {
       const response = record as unknown as RpcResponse;
-      const pending = this.pending.get(record.id);
+      const pending = proc.pending.get(record.id);
       if (!pending) return;
-      this.pending.delete(record.id);
+      proc.pending.delete(record.id);
+      clearTimeout(pending.timer);
       response.success ? pending.resolve(response.data) : pending.reject(new Error(response.error || `${response.command} failed`));
     }
 
     if (record.type === 'message_update') {
       const event = record.assistantMessageEvent as { type?: string; delta?: string } | undefined;
-      if (event?.type === 'text_delta' && event.delta) this.lastAssistantText += event.delta;
+      if (event?.type === 'text_delta' && event.delta) proc.lastAssistantText += event.delta;
     }
 
-    if (record.type === 'agent_settled') {
-      this.running = false;
-      const waiters = this.waiters.splice(0);
-      for (const waiter of waiters) waiter.resolve();
+    if (record.type === 'agent_settled') this.settleProcess(proc);
+  }
+
+  private settleProcess(proc: RpcProcess): void {
+    proc.running = false;
+    for (const waiter of proc.waiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
     }
+    proc.waiters.clear();
   }
 
   async command<T = unknown>(type: string, fields: Record<string, unknown> = {}): Promise<T> {
     if (this.config.mock) return this.mockCommand(type, fields) as T;
     this.start();
     if (!this.proc) throw new Error('pi rpc process did not start');
+    return this.commandForProcess<T>(this.proc, type, fields);
+  }
+
+  private commandForProcess<T>(proc: RpcProcess, type: string, fields: Record<string, unknown> = {}): Promise<T> {
+    this.assertProcess(proc);
     const id = `cmd-${this.nextId++}`;
-    const record = { id, type, ...fields };
-    const promise = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (data: unknown) => void, reject });
+    const record = JSON.stringify({ ...fields, id, type }) + '\n';
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.finishProcess(proc, new Error(`timed out waiting for pi rpc ${type} response`));
+      }, this.commandTimeoutMs);
+      proc.pending.set(id, { resolve: resolve as (data: unknown) => void, reject, timer });
+      try {
+        if (!proc.child.stdin.writable || proc.child.stdin.destroyed) throw new Error('pi rpc stdin is not writable');
+        proc.child.stdin.write(record, error => {
+          if (error) this.finishProcess(proc, error);
+        });
+      } catch (error) {
+        this.finishProcess(proc, error instanceof Error ? error : new Error(String(error)));
+      }
     });
-    this.proc.stdin.write(JSON.stringify(record) + '\n');
-    return promise;
   }
 
   isRunning(): boolean {
-    return this.running;
+    return this.proc?.running ?? false;
   }
 
   async promptAndWait(message: string): Promise<string> {
     if (this.config.mock) {
       return `mock pi reply: ${message.slice(0, 120)}`;
     }
-    this.lastAssistantText = '';
-    this.running = true;
+    this.start();
+    const proc = this.proc;
+    if (!proc) throw new Error('pi rpc process did not start');
+    if (proc.running) throw new Error('pi rpc agent is already running');
+    proc.lastAssistantText = '';
+    proc.running = true;
     let response: PromptResponse;
     try {
-      response = await this.command<PromptResponse>('prompt', { message });
+      response = await this.commandForProcess<PromptResponse>(proc, 'prompt', { message });
+      this.assertProcess(proc);
     } catch (error) {
-      this.running = false;
+      this.finishProcess(proc, error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
     if (response?.disposition === 'handled') {
-      this.running = false;
-      return this.getLastAssistantText();
+      this.settleProcess(proc);
+      const last = await this.commandForProcess<LastAssistantTextResponse>(proc, 'get_last_assistant_text');
+      return last.text ?? '';
     }
-    await this.waitForSettled();
-    const last = await this.command<LastAssistantTextResponse>('get_last_assistant_text').catch(() => ({ text: this.lastAssistantText }));
-    return last.text ?? this.lastAssistantText;
+    await this.waitForProcessSettled(proc, this.settledTimeoutMs);
+    this.assertProcess(proc);
+    const last = await this.commandForProcess<LastAssistantTextResponse>(proc, 'get_last_assistant_text').catch(() => ({ text: proc.lastAssistantText }));
+    return last.text ?? proc.lastAssistantText;
   }
 
-  waitForSettled(timeoutMs = 10 * 60 * 1000): Promise<void> {
-    if (!this.running) return Promise.resolve();
+  waitForSettled(timeoutMs = this.settledTimeoutMs): Promise<void> {
+    const proc = this.proc;
+    if (!proc) return this.lastProcessError ? Promise.reject(this.lastProcessError) : Promise.resolve();
+    return this.waitForProcessSettled(proc, timeoutMs);
+  }
+
+  private waitForProcessSettled(proc: RpcProcess, timeoutMs: number): Promise<void> {
+    if (proc.error) return Promise.reject(proc.error);
+    if (!proc.running) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timed out waiting for agent_settled')), timeoutMs);
-      this.waiters.push({
-        resolve: () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        reject,
-      });
+      const timer = setTimeout(() => {
+        this.finishProcess(proc, new Error('timed out waiting for agent_settled'));
+      }, timeoutMs);
+      proc.waiters.add({ resolve, reject, timer });
     });
   }
 
@@ -213,9 +326,7 @@ export class PiRpcRunner {
   }
 
   close(): void {
-    if (!this.proc) return;
-    if (this.proc.stdin.writable) this.proc.stdin.end();
-    this.proc.kill('SIGTERM');
+    if (this.proc) this.finishProcess(this.proc, new Error('pi rpc runner closed'));
   }
 }
 

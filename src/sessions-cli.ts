@@ -1,18 +1,15 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
 import { loadConfig } from './config.js';
 import { detectParentCallback } from './session-callbacks.js';
-import { notifySessionCompletion } from './session-notifier.js';
+import { runSessionPrompt, selectSessionAgent } from './session-service.js';
+export { runSessionPrompt } from './session-service.js';
 import {
-  appendSessionLog,
   getSession,
   loadRegistry,
   makeSessionId,
   newSessionRecord,
-  putSession,
+  insertSession,
   refreshSessionStatus,
-  type PersonalSessionRecord,
 } from './session-registry.js';
 import type { AppConfig } from './types.js';
 
@@ -21,6 +18,7 @@ interface ParsedOptions {
   id?: string;
   cwd?: string;
   name?: string;
+  agent?: string;
   notify?: boolean;
   prompt?: string;
   message?: string;
@@ -31,7 +29,7 @@ interface ParsedOptions {
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal sessions create [--id <id>] [--cwd <cwd>] [--name <name>] [--return|--no-return] [--notify|--no-notify] [--prompt <text>] [--stdin] [--wait]
+  pi-personal sessions create [--id <id>] [--cwd <cwd>] [--name <name>] [--agent <profile>] [--return|--no-return] [--notify|--no-notify] [--prompt <text>] [--stdin] [--wait]
   pi-personal sessions send <id> [--message <text>] [--stdin] [--wait] [--return|--no-return] [--notify|--no-notify]
   pi-personal sessions list
   pi-personal sessions status <id>
@@ -50,6 +48,7 @@ function parseOptions(args: string[]): ParsedOptions {
     else if (arg === '--id') out.id = needValue(args, ++i, arg);
     else if (arg === '--cwd') out.cwd = needValue(args, ++i, arg);
     else if (arg === '--name') out.name = needValue(args, ++i, arg);
+    else if (arg === '--agent') out.agent = needValue(args, ++i, arg);
     else if (arg === '--prompt') out.prompt = needValue(args, ++i, arg);
     else if (arg === '--message') out.message = needValue(args, ++i, arg);
     else if (arg === '--lines') out.lines = Number(needValue(args, ++i, arg));
@@ -105,7 +104,8 @@ async function createSession(config: AppConfig, opts: ParsedOptions): Promise<vo
     parentCallback: notify ? detectParentCallback(config) : undefined,
     prompt,
   });
-  putSession(config, record);
+  record = selectSessionAgent(config, record, opts.agent, opts.cwd);
+  record = insertSession(config, record);
   if (prompt) record = await runSessionPrompt(config, record, prompt, Boolean(opts.wait));
   console.log(JSON.stringify(record, null, 2));
 }
@@ -113,6 +113,7 @@ async function createSession(config: AppConfig, opts: ParsedOptions): Promise<vo
 async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void> {
   const id = opts.positionals[0];
   if (!id) usage();
+  if (opts.agent) throw new Error('--agent is only supported by sessions create; a session backend cannot be changed');
   const prompt = await promptFromOptions(opts, 'message');
   if (!prompt) throw new Error('sessions send requires --message or --stdin');
   let record = getSession(config, id);
@@ -145,83 +146,4 @@ function historySession(config: AppConfig, opts: ParsedOptions): void {
   const lines = fs.readFileSync(record.logPath, 'utf8').split('\n');
   const count = opts.lines && opts.lines > 0 ? opts.lines : 40;
   console.log(lines.slice(-count).join('\n'));
-}
-
-export async function runSessionPrompt(config: AppConfig, session: PersonalSessionRecord | string, prompt: string, wait: boolean): Promise<PersonalSessionRecord> {
-  let record = typeof session === 'string' ? getSession(config, session) : session;
-  record.status = 'running';
-  record.lastPrompt = prompt;
-  record.error = undefined;
-  record.exitCode = undefined;
-  record = putSession(config, record);
-  appendSessionLog(record, `\n## ${new Date().toISOString()} prompt\n${prompt}\n\n`);
-
-  if (config.agent.mock) {
-    const result = `mock pi reply: ${prompt.slice(0, 120)}`;
-    record.status = 'completed';
-    record.lastResult = result;
-    appendSessionLog(record, result + '\n');
-    record = putSession(config, record);
-    return notifyCompletion(config, record);
-  }
-
-  if (wait) return runPromptSync(config, record, prompt);
-  return runPromptAsync(config, record, prompt);
-}
-
-function piArgs(config: AppConfig, record: PersonalSessionRecord, prompt: string): string[] {
-  return [
-    '--print',
-    '--session-id', record.sessionId,
-    ...(record.sessionDir ? ['--session-dir', record.sessionDir] : []),
-    '--approve',
-    prompt,
-    ...(config.agent.extraArgs || []),
-  ];
-}
-
-async function runPromptSync(config: AppConfig, record: PersonalSessionRecord, prompt: string): Promise<PersonalSessionRecord> {
-  const result = spawnSync(config.agent.piBin, piArgs(config, record, prompt), {
-    cwd: record.cwd,
-    encoding: 'utf8',
-    env: childEnv(record),
-  });
-  const output = `${result.stdout || ''}${result.stderr || ''}`;
-  appendSessionLog(record, output);
-  record.exitCode = result.status;
-  record.lastResult = output.trim().slice(-4000);
-  record.status = result.status === 0 ? 'completed' : 'failed';
-  if (result.error) record.error = result.error.message;
-  record = putSession(config, record);
-  return notifyCompletion(config, record);
-}
-
-function runPromptAsync(config: AppConfig, record: PersonalSessionRecord, prompt: string): PersonalSessionRecord {
-  const promptFile = path.join(path.dirname(record.logPath), `${record.id}.prompt`);
-  fs.mkdirSync(path.dirname(promptFile), { recursive: true });
-  fs.writeFileSync(promptFile, prompt);
-  const watcherArgs = ['dist/session-watcher.js', '--config', process.env.PERSONAL_DAEMON_CONFIG || `${process.cwd()}/config.json`, '--id', record.id, '--prompt-file', promptFile];
-  const watcher = spawn(process.execPath, watcherArgs, { cwd: process.cwd(), detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: childEnv(record) });
-  record.pid = watcher.pid;
-  watcher.unref();
-  return putSession(config, record);
-}
-
-function childEnv(record?: PersonalSessionRecord): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    PATH: `${process.cwd()}/dist:${process.env.PATH || ''}`,
-    ...(record ? sessionEnv(record) : {}),
-  };
-}
-
-function sessionEnv(record: PersonalSessionRecord): NodeJS.ProcessEnv {
-  return {
-    PI_PERSONAL_SESSION_ID: record.id,
-    ...(record.parentCallback ? { PI_PERSONAL_PARENT_CALLBACK: JSON.stringify(record.parentCallback) } : {}),
-  };
-}
-
-async function notifyCompletion(config: AppConfig, record: PersonalSessionRecord): Promise<PersonalSessionRecord> {
-  return notifySessionCompletion(config, record);
 }

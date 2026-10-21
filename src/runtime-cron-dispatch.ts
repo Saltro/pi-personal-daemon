@@ -1,8 +1,8 @@
 import { normalizeInbound } from './events.js';
-import { loadCronRegistry, saveCronRegistry, normalizeRuntimeCron, type RuntimeCronRecord } from './cron-registry.js';
+import { claimCronRun, loadCronRegistry, patchCron, patchCronRun, recoverRunningCrons, normalizeRuntimeCron, type RuntimeCronRecord } from './cron-registry.js';
 import { callbackQueuePath } from './session-callbacks.js';
-import { getSession, makeSessionId, newSessionRecord, putSession, type ParentCallback, type PersonalSessionRecord } from './session-registry.js';
-import { runSessionPrompt } from './sessions-cli.js';
+import { getSession, makeSessionId, newSessionRecord, insertSession, type ParentCallback, type PersonalSessionRecord } from './session-registry.js';
+import { runSessionPrompt, selectSessionAgent } from './session-service.js';
 import type { AppConfig, InboundEvent } from './types.js';
 
 const POLL_MS = 1000;
@@ -14,6 +14,8 @@ export class RuntimeCronDispatcher {
   constructor(private config: AppConfig, private onMainEvent: (event: InboundEvent) => Promise<void>) {}
 
   start(): void {
+    if (this.timer) return;
+    recoverRunningCrons(this.config);
     this.poll();
     this.timer = setInterval(() => this.poll(), POLL_MS);
   }
@@ -34,13 +36,15 @@ export class RuntimeCronDispatcher {
   }
 
   private async fire(record: RuntimeCronRecord): Promise<void> {
-    markRuntimeCronRunning(this.config, record.id);
+    const claimed = claimCronRun(this.config, record.id);
+    if (!claimed) return;
+    record = claimed;
     console.error(`[runtime-cron] fire id=${record.id} target=${record.target}`);
     try {
       await dispatchRuntimeCron(this.config, record, this.onMainEvent);
-      markRuntimeCronFinished(this.config, record.id, undefined);
+      finishClaimedRuntimeCron(this.config, record, undefined);
     } catch (error) {
-      markRuntimeCronFinished(this.config, record.id, error instanceof Error ? error.message : String(error));
+      finishClaimedRuntimeCron(this.config, record, error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -53,39 +57,28 @@ export function dueRuntimeCrons(config: AppConfig, now = new Date()): RuntimeCro
 }
 
 export function markRuntimeCronRunning(config: AppConfig, id: string, now = new Date()): RuntimeCronRecord {
-  const registry = loadCronRegistry(config, now);
-  const record = registry.crons[id];
-  if (!record) throw new Error(`cron not found: ${id}`);
-  record.status = 'running';
-  record.lastFiredAt = now.toISOString();
-  record.lastError = undefined;
-  record.updatedAt = now.toISOString();
-  registry.crons[id] = record;
-  saveCronRegistry(config, registry);
-  return record;
+  return patchCron(config, id, { status: 'running', lastFiredAt: now.toISOString(), lastError: undefined }, now);
 }
 
 export function markRuntimeCronFinished(config: AppConfig, id: string, error?: string, now = new Date()): RuntimeCronRecord {
-  const registry = loadCronRegistry(config, now);
-  const record = registry.crons[id];
+  const record = loadCronRegistry(config, now).crons[id];
   if (!record) throw new Error(`cron not found: ${id}`);
-  record.lastError = error;
-  record.updatedAt = now.toISOString();
-  if (error) {
-    record.status = 'failed';
-    registry.crons[id] = normalizeRuntimeCron(record, now);
-  } else if (record.schedule.type === 'at') {
-    record.enabled = false;
-    record.status = 'completed';
-    record.nextRunAt = undefined;
-    registry.crons[id] = record;
-  } else {
-    record.status = 'scheduled';
-    record.nextRunAt = undefined;
-    registry.crons[id] = normalizeRuntimeCron(record, now);
-  }
-  saveCronRegistry(config, registry);
-  return registry.crons[id];
+  if (error) return patchCron(config, id, { status: 'failed', lastError: error }, now);
+  if (record.schedule.type === 'at') return patchCron(config, id, { enabled: false, status: 'completed', nextRunAt: undefined, lastError: undefined }, now);
+  const next = normalizeRuntimeCron({ ...record, status: 'scheduled', nextRunAt: undefined, lastError: undefined }, now);
+  return patchCron(config, id, { status: next.status, nextRunAt: next.nextRunAt, lastError: undefined }, now);
+}
+
+function finishClaimedRuntimeCron(config: AppConfig, claimed: RuntimeCronRecord, error?: string, now = new Date()): RuntimeCronRecord | undefined {
+  if (!claimed.runId) throw new Error(`claimed cron has no run token: ${claimed.id}`);
+  const current = loadCronRegistry(config, now).crons[claimed.id];
+  if (!current || current.runId !== claimed.runId || current.status !== 'running') return undefined;
+  const patch: Partial<RuntimeCronRecord> = error
+    ? { status: 'failed', lastError: error }
+    : current.schedule.type === 'at'
+      ? { enabled: false, status: 'completed', nextRunAt: undefined, lastError: undefined }
+      : { status: 'scheduled', nextRunAt: normalizeRuntimeCron({ ...current, status: 'scheduled', nextRunAt: undefined }, now).nextRunAt, lastError: undefined };
+  return patchCronRun(config, claimed.id, claimed.runId, patch, now);
 }
 
 export async function dispatchRuntimeCron(config: AppConfig, record: RuntimeCronRecord, onMainEvent: (event: InboundEvent) => Promise<void>): Promise<void> {
@@ -96,7 +89,7 @@ export async function dispatchRuntimeCron(config: AppConfig, record: RuntimeCron
 
   if (record.target === 'new') {
     const id = `${record.id}-${makeSessionId()}`;
-    const session = putSession(config, newSessionRecord(config, { id, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt }));
+    const session = insertSession(config, selectSessionAgent(config, newSessionRecord(config, { id, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt })));
     await runSessionPrompt(config, session, record.prompt, false);
     return;
   }
@@ -112,11 +105,12 @@ function fixedSessionTarget(config: AppConfig, record: RuntimeCronRecord, sessio
     session = getSession(config, sessionId);
   } catch (error) {
     if (!(error instanceof Error) || error.message !== `session not found: ${sessionId}`) throw error;
-    session = newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt });
+    session = selectSessionAgent(config, newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt }));
   }
   session.notify = false;
   session.parentCallback = mainParentCallback(config);
-  return putSession(config, session);
+  // Notify/callback changes are committed with the run claim, never by a stale pre-run overwrite.
+  return session;
 }
 
 function mainParentCallback(config: AppConfig): ParentCallback {
