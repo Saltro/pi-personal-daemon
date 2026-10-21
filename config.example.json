@@ -8,6 +8,26 @@
     ],
     "mock": false
   },
+  "channel": {
+    "type": "feishu"
+  },
+  "agentProfiles": {
+    "research": {
+      "backend": "pi",
+      "piBin": "pi",
+      "extraArgs": [],
+      "commandTimeoutMs": 30000,
+      "cwd": "/path/to/research-workspace"
+    },
+    "local-cli": {
+      "backend": "process",
+      "command": "/path/to/agent-cli",
+      "args": [],
+      "promptMode": "stdin",
+      "timeoutMs": 600000,
+      "cwd": "/path/to/workspace"
+    }
+  },
   "http": {
     "enabled": true,
     "host": "127.0.0.1",

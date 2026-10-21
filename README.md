@@ -1,276 +1,228 @@
 # pi-personal-daemon
 
-Minimal TypeScript prototype for a single personal Feishu → Pi carrier daemon.
+A local personal daemon with one visible chat destination, a main agent, child sessions, and timed wakeups. Feishu and Pi are the default adapters; channel implementations and per-session agent backends can be selected independently.
 
-## Shape
+**Single-chat and fixed visible output are product choices.** This is not a multi-chat router. All explicit child returns and requested completion notices go to the main agent. Agent-native history, tools, memory, skills, and compression stay with the selected backend.
 
-- One local daemon on one machine, bound to one Pi agent session.
-- Feishu stays the client entrance.
-- Pi is the runtime: memory, tools, web search, subagents, skills, and compression stay inside Pi.
-- The daemon only handles transport duties: receive events, normalize prompts, run or continue Pi over RPC, expose a local send CLI, and trigger timed wakeups.
-- Product concepts such as workspaces, channels, tasks, multi-bot orchestration, and a separate search layer are outside this prototype.
+## Install and test
 
-## Files
-
-- `src/config.ts` — config from `config.json` plus env overrides.
-- `src/events.ts` — inbound Feishu/mock event normalization and Pi prompt formatting.
-- `src/receivers.ts` — HTTP webhook receiver and stdin JSON/text receiver.
-- `src/pi-runner.ts` — minimal Pi RPC subprocess client.
-- `src/runtime-context.ts` — current inbound context file used by the local send CLI for reply metadata.
-- `src/feishu-binding.ts` — durable single Feishu chat binding under the daemon state directory.
-- `src/bind-cli.ts` — `pi-personal bind` commands for the Feishu chat binding.
-- `src/cli.ts` — `pi-personal` main CLI with `send`, `return`, `bind`, `sessions`, and `cron` subcommands.
-- `src/send-command.ts` — shared send command implementation.
-- `src/return-command.ts` — explicit child/session return command implementation.
-- `src/cron-cli.ts` — persistent runtime cron commands.
-- `src/cron-registry.ts` — JSON-backed runtime cron registry.
-- `src/runtime-cron-dispatch.ts` — daemon dispatcher for persisted runtime cron records.
-- `src/sessions-cli.ts` — local session registry commands.
-- `src/session-registry.ts` — JSON-backed session registry.
-- `src/session-watcher.ts` — async session completion watcher.
-- `src/sender.ts` — outbound sender interface, mock sender, Feishu interactive-card sender/reaction helper.
-- `src/scheduler.ts` — timed wakeups with `intervalMs` or a small standard 5-field cron subset.
-- `src/daemon.ts` — serial event pipeline.
-- `src/index.ts` — CLI entrypoint source.
-- `src/types.ts` — shared config/event/sender types.
-- `test/smoke.ts` — local mock smoke test.
-- `rsbuild.config.ts` — Rsbuild bundle config for Node output.
-- `tsconfig.json` — TypeScript typecheck config.
-- `scripts/fix-bin.js` — post-build shebang/chmod for the CLI bundle.
-- `dist/index.js` — generated runnable CLI bundle after `npm run build`.
-
-## Install
+Requires Node **22.13+**, pnpm **10.34.4**, and a Unix-like environment (macOS/Linux with `ps`) for the supervised process lifecycle. SQLite uses Node's built-in `node:sqlite`; some supported Node versions emit an experimental warning. The test suite was run on macOS with Node 24.13.1; the minimum Node version has not been exercised here.
 
 ```bash
-cd /data00/home/fengzhiyang.ping/pi-personal-daemon
-npm install
+pnpm install --frozen-lockfile
 cp config.example.json config.json
+# Edit the example paths and credentials before starting.
+pnpm test
 ```
 
-Edit `config.json` or use env vars:
+`pnpm test` runs typecheck, builds the Node bundles, runs focused regression tests, then the mock/fake-process smoke test. No real model or Feishu API calls are used by these tests. pnpm's default dependency-script policy remains in effect; the project does not automatically approve dependency build scripts.
 
 ```bash
-export PI_DAEMON_SESSION_ID=personal-agent
-export PI_DAEMON_CWD=/data00/home/fengzhiyang.ping
-export PI_DAEMON_MOCK_OUTBOX=/tmp/pi-personal-outbox.jsonl
-export FEISHU_APP_ID=cli_xxx
-export FEISHU_APP_SECRET=xxx
-export FEISHU_VERIFICATION_TOKEN=xxx
-export FEISHU_ENCRYPT_KEY=xxx
-export FEISHU_BASE_URL=https://open.feishu.cn
-```
-
-## Build
-
-```bash
-npm run typecheck
-npm run build
-```
-
-`npm run build` uses Rsbuild and writes `dist/index.js`, `dist/cli.js`, and `dist/session-watcher.js`. The daemon is exposed as `pi-personal-daemon`; the local CLI is `pi-personal`.
-
-## Run locally with mock sender
-
-```bash
-cd /data00/home/fengzhiyang.ping/pi-personal-daemon
-npm run build
+pnpm run build
 node dist/index.js
+# Source-mode development:
+pnpm run dev
 ```
 
-For source-mode development:
+Bundles: `dist/index.js` (daemon), `dist/cli.js` (local CLI), `dist/session-watcher.js` (async supervisor). The build also writes an executable `dist/pi-personal` helper. Use an installed package binary or put `dist` on your PATH for manual CLI calls; agent subprocesses receive the installed helper path automatically.
+
+## Configuration
+
+`PERSONAL_DAEMON_CONFIG` selects a config file; otherwise the CLI loads `config.json` from its current directory. `src/config.ts` merges defaults, file configuration, and existing environment overrides. The resolved config path is passed to child processes, including when their working directory differs from the install directory.
+
+Existing Pi/Feishu configuration remains supported:
+
+```json
+{
+  "agent": {
+    "sessionId": "personal-agent",
+    "cwd": "/path/to/workspace",
+    "piBin": "pi",
+    "extraArgs": [],
+    "mock": false
+  },
+  "channel": { "type": "feishu" },
+  "sender": { "type": "mock", "mockOutbox": "./outbox.jsonl" },
+  "runtime": { "stateDir": "/path/to/daemon-state" }
+}
+```
+
+Common overrides: `PI_DAEMON_SESSION_ID`, `PI_DAEMON_CWD`, `PI_BIN`, `PI_DAEMON_SESSION_DIR`, `PI_DAEMON_EXTRA_ARGS`, `PI_DAEMON_MOCK`, `PI_DAEMON_CHANNEL`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_VERIFICATION_TOKEN`, `FEISHU_ENCRYPT_KEY`, and `FEISHU_BASE_URL`. Existing state/context environment overrides remain supported. Extra args from the existing environment variable are space-separated; use JSON arrays for arguments containing spaces.
+
+### Channel adapters
+
+- **`feishu`** (default): existing webhook / WebSocket receivers, interactive-card sender, reactions, and ten-second user-message debounce. `sender.type=mock` writes cards and reactions to JSONL instead of calling Feishu.
+- **`stdio`**: stdin ingestion and plain-text stdout output from `pi-personal send`; no Feishu receiver, card, reaction, or debounce. Output belongs to the send process's stdout, so it is useful for local pipelines/debugging rather than a separate terminal notification service.
+
+`stdin.enabled` remains an optional input source with either adapter. Feishu `eventMode` accepts `ws`, `webhook`, or both via the existing configuration. Real Feishu sending needs `sender.type=feishu` and app credentials. Webhook verification / encrypted payload handling remains in the Feishu receiver.
+
+The static registry in `src/channels.ts` defines the adapter boundary: receiver lifecycle, sender, binding behavior, debounce, and dedupe. Register new adapters in application code so daemon and CLI bundles load the same registration. No dynamic plugin loader or multi-chat routing is involved.
+
+### Agent profiles
+
+The legacy `agent` config is the default profile. Add named profiles for sessions or select one for the main agent with `agent.profile`:
+
+```json
+{
+  "agentProfiles": {
+    "research": {
+      "backend": "pi",
+      "piBin": "pi",
+      "cwd": "/path/to/research-workspace",
+      "extraArgs": [],
+      "commandTimeoutMs": 30000
+    },
+    "other-harness": {
+      "backend": "process",
+      "command": "/path/to/agent-cli",
+      "args": [],
+      "promptMode": "stdin",
+      "timeoutMs": 600000,
+      "cwd": "/path/to/workspace"
+    },
+    "fake": {
+      "backend": "mock",
+      "replyPrefix": "mock reply: "
+    }
+  }
+}
+```
+
+Built-in backends:
+
+- **`pi`**: main session uses persistent JSON-lines RPC; child prompts use Pi's print execution. Supports steer, native message access, and context usage. Child `--wait` awaits the supervised execution outcome; it does not change the backend protocol.
+- **`process`**: runs an external harness command for each prompt, plain-text stdin by default. `promptMode=argument` expands `{prompt}` / `{sessionId}` templates, appending the prompt if no `{prompt}` template exists. This is not Pi RPC; steer/native history/context usage are explicitly unavailable. The external harness owns any persistent history and can use the session ID supplied by the adapter. Optional `timeoutMs` applies to main and child runs (positive milliseconds, at most 2,147,483,647); main defaults to ten minutes when omitted, while child runs have no execution deadline unless configured.
+- **`mock`**: local deterministic results for testing.
+
+`sessions create --agent <profile>` saves the chosen profile and resolved options. Later sends and fixed-session crons retain that selection even if global defaults change. Imported sessions without an agent selection use the legacy `agent` Pi/mock settings, not a newly selected main profile; retain those settings when switching main to another backend. There is no automatic cross-backend history migration. New sessions without `--agent` use the main/default profile.
+
+The static agent registry and capability contract are in `src/agents/`. Add a backend there rather than teaching the core to imitate a backend's CLI protocol. A main backend without steer simply queues subsequent user-message batches instead of attempting unsupported steering.
+
+## Fixed output and returns
+
+Bind the single visible destination:
 
 ```bash
-npm run dev
-```
-
-Type a text line on stdin:
-
-```text
-hello from stdin
-```
-
-Or send a mock HTTP message:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8787/feishu/webhook \
-  -H 'content-type: application/json' \
-  -d '{"type":"message","id":"local-1","chatId":"chat-local","text":"hello"}'
-```
-
-The daemon writes current inbound context to the runtime context file, prompts Pi, and leaves visible replies to the agent. Real Feishu inbound messages auto-create the single chat binding when none exists. For mock/local use, bind a destination first:
-
-```bash
-pi-personal bind feishu-chat --chat-id chat-local
-pi-personal bind status
-printf 'reply text' | pi-personal send --stdin
-```
-
-Replies are appended as JSONL to `outbox.jsonl` when `sender.type` is `mock`.
-
-## Smoke test
-
-```bash
-npm run smoke
-```
-
-The smoke test runs `test/smoke.ts` with `tsx` and uses `agent.mock=true`, so it validates the daemon pipeline without starting a real Pi model call. It covers `pi-personal send` and the local `pi-personal sessions` MVP.
-
-## Pi RPC behavior
-
-`src/pi-runner.ts` starts:
-
-```bash
-pi --mode rpc --session-id <sessionId> ...extraArgs
-```
-
-`agent.sessionDir` is optional. When explicitly configured, the runner adds `--session-dir <sessionDir>`; otherwise Pi uses its normal/default session storage, so `pi --resume` can find the session normally.
-
-For each inbound event, the daemon writes the current context file, sends a processing reaction when a Feishu `message_id` is available, sends a `prompt` command, and waits for `agent_settled`. The prompt tells the agent to call `pi-personal send --stdin` for visible Feishu replies and `pi-personal return --stdin` for explicit reports to the parent/main Pi session. The daemon logs `reply not sent` when the agent settles without using the send CLI.
-
-## `pi-personal` CLI
-
-Bind the single Feishu chat destination:
-
-```bash
+pi-personal bind destination --chat-id oc_xxx
+# Compatibility alias:
 pi-personal bind feishu-chat --chat-id oc_xxx
 pi-personal bind status
-```
-
-Visible replies always send to the bound Feishu chat. The current inbound context supplies metadata such as `inReplyTo`, `sendCount`, and the daemon-populated context usage footer:
-
-```bash
 pi-personal send '**hello** from markdown'
-printf 'hello from `stdin`' | pi-personal send --stdin
+printf 'longer reply' | pi-personal send --stdin
 ```
 
-Report text back to the parent/main Pi session from a child/session run:
+The first real Feishu message auto-binds when no destination exists. Every visible reply uses the bound destination, not the latest callback's parent metadata. `stdio` can send without a prior binding.
+
+The daemon does not automatically forward final agent text. Prompts tell the agent to use `pi-personal send` for visible output. Feishu renders card JSON 2.0 markdown and a grey context occupancy footer. Send accounting updates the current SQLite context atomically; an event switch while the network send is in flight does not increment the new event's count.
+
+`return` is a separate path to the main agent:
 
 ```bash
-pi-personal return 'short status for parent'
-printf 'longer status' | pi-personal return --stdin
+pi-personal return 'short result for main'
+printf 'longer report' | pi-personal return --stdin
 ```
 
-`pi-personal return` accepts text args or `--stdin`, writes a local callback queue entry, and requires parent callback metadata from a `pi-personal sessions ... --return` launch or a cron-created child/fixed session. Without that metadata it exits with an error explaining that no parent callback metadata is available.
+It needs parent metadata supplied by a session/cron launch or the surrounding Pi process. It does not send a visible chat message.
 
-The text or stdin body is placed in a Feishu card JSON 2.0 `markdown` element so inline code, lists, and other card markdown features render in the client. The card uses the v2 envelope (`schema: "2.0"`, `config.update_multi`, `config.width_mode`, and vertical `body.elements`), matching Feishu's inline-code support and botmux's reply-card shape. The send command appends a small grey footer from the runtime context file with only context occupancy, such as `Context 37%`; agents keep the message body focused on reply content.
-
-Session-control MVP:
+## Sessions
 
 ```bash
-pi-personal sessions create --id research-1 --name "Research" --prompt "look into X" --wait
-pi-personal sessions send research-1 --message "continue with Y" --wait
-pi-personal sessions create --prompt "run async" --return
-pi-personal sessions create --prompt "run async silently" --no-return
+pi-personal sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
+pi-personal sessions send research-1 --message 'continue with Y' --wait
+pi-personal sessions create --agent other-harness --prompt 'run asynchronously' --no-return
+pi-personal sessions create --prompt 'run and notify main' --return
 pi-personal sessions list
 pi-personal sessions status research-1
 pi-personal sessions history research-1 --lines 80
 ```
 
-The registry is a local JSON file under `runtime.stateDir` or `~/.cache/pi-personal-daemon/sessions/registry.json`. Each record stores `id`, `sessionId`, `cwd`, optional `sessionDir`, `status`, watcher `pid`, boolean `notify`, parent callback metadata, timestamps, last prompt/result, log path, and last parent notification path.
+- Each record saves the session ID, agent selection/snapshot, working directory, status, run token, worker/supervisor PID, return settings, timestamps, last prompt/result, and log path.
+- A running session rejects another execution. This is cross-process acquisition, not an in-memory lock. Before a new run, an owner that has demonstrably disappeared is repaired as an interrupted failure; live workers, supervisors, or owned process groups remain busy. Old run tokens cannot complete newer runs.
+- Async execution uses a unique prompt file and a supervised startup handshake. The watcher is resolved from the installed module, not the caller's cwd. Startup failures are recorded instead of being silently marked successful.
+- PID loss is failure/interruption, never proof of successful completion. A still-live worker, supervisor, or owned process group prevents accidental restart overlap. Unix timeout/cancellation terminates the owned group and confirms exit before releasing the run; pipe decoding preserves UTF-8 across chunks.
+- Duplicate explicit session IDs are rejected, not overwritten.
+- CLI `history` shows the daemon execution log; native backend history stays with the backend.
+- `--return` requests a completion notice; `--notify` remains an alias. `--no-return` / `--no-notify` suppress completion notices, not explicit `return` calls.
+- Without a flag, completion notification defaults on only if `PI_SESSION_ID` or `PI_SESSION_FILE` is present. Outside Pi it defaults off.
 
-`sessions --return` has one meaning: notify the parent/main Pi session when the child session completes. `--notify` remains a compatibility alias, and `--no-notify` remains a compatibility alias for `--no-return`. It writes a local callback queue entry under `runtime.stateDir/session-callbacks/<parent-session-id>/`. The daemon polls that queue and turns the completion into an internal wake message for the main Pi session, so the parent can decide whether to send Feishu with `pi-personal send`, inspect `pi-personal sessions history <id>`, continue the child, or record the result.
+Completion state and its requested callback are committed together in SQLite. Callback records are claimed one at a time when main actually begins delivery and acknowledged after agent processing; a waiting backlog does not consume retry attempts. A failed delivery is retried with a short backoff, up to three attempts. Interrupted claims recover on daemon startup; exhausted records remain failed for inspection. This provides bounded retry, **not exactly-once external side effects**. A crash after an agent acts but before acknowledgment can cause duplicate processing.
 
-When `--return` is omitted, `sessions create` defaults to parent notification if `PI_SESSION_ID` or `PI_SESSION_FILE` is available in the current Pi process. Outside Pi, it defaults to `--no-return`. Parent notification is local-file based; the daemon for the same `runtime.stateDir` must be running to deliver the queue entry into the main session.
+## SQLite state and migration
 
-The runner also exposes `getState()` and `getMessages()` through Pi RPC commands. Before and after each Pi prompt, the daemon calls `get_state` and `get_messages`, extracts context occupancy only from semantically named context/token fields, and stores it in the runtime context file for `pi-personal send`. Current Pi RPC `get_state` in this environment exposes `model.contextWindow`, `model.maxTokens`, model/session/status fields, `messageCount`, and `pendingMessageCount`; `get_messages` exposes assistant `usage` records. The footer never labels message counts, pending counts, or `model.maxTokens` as used tokens. If reliable used+limit data cannot be derived, the footer is `Context usage unavailable`.
+Mutable daemon state lives in `runtime.stateDir/state.sqlite`, defaulting to `~/.cache/pi-personal-daemon/state.sqlite`. Session/cron records are independent SQL records; current context and output binding remain singleton state. WAL, a busy timeout, short transactions, field updates, and conditional run-token writes handle multiple CLI/watcher processes.
 
-## Scheduler / active wakeups
+`runtime.contextFile` only selects the legacy context import location; it does not change the state directory. Without `stateDir`, the legacy default `~/.cache/pi-personal-daemon` is preserved so existing sessions, crons, binding, and callbacks are found. Tests and isolated clients must set an explicit temporary `stateDir`. `contextFile` is not an actively rewritten JSON projection.
 
-`config.scheduler.wakeups` accepts interval records:
+First database access imports existing daemon JSON state transactionally and once:
 
-```json
-{
-  "id": "hourly-interval",
-  "intervalMs": 3600000,
-  "prompt": "Active wakeup: inspect context and decide whether to send."
-}
-```
+- `sessions/registry.json`
+- `cron/registry.json`
+- `feishu-chat-binding.json`
+- the configured legacy current context file
+- existing `session-callbacks` notices
 
-It also accepts standard 5-field cron records:
+Before deploying this migration, stop the old daemon and all old state-writing CLI/watchers. Keep the same state directory and verify the new records with CLI status/list commands. Malformed legacy state fails import with an error rather than being silently discarded. Source JSON files are retained; new code does not dual-write them. Do not keep old and new writers running together.
 
-```json
-{
-  "id": "hourly-note",
-  "cron": "0 * * * *",
-  "prompt": "Hourly wakeup: inspect context and decide whether to send."
-}
-```
+Logs, mock outbox, config, and Pi-native history/memory/skills remain files. Runtime SQL transactions never wait on model execution, spawn, RPC, or network calls. No real cache migration is performed by the test suite.
 
-```json
-{
-  "id": "morning-check",
-  "cron": "30 9 * * *",
-  "prompt": "Morning wakeup: review memory and decide whether a short Feishu note would be useful."
-}
-```
+## Scheduler and runtime cron
 
-Supported cron syntax is exactly five fields: `minute hour day-of-month month day-of-week`. Each field supports `*`, `*/n`, single numbers, and comma lists such as `0,30` or `9,17`. Ranges, names, seconds, and macros are outside this subset. Day-of-week accepts `0` or `7` for Sunday. When both day-of-month and day-of-week are specific, either field may match, following common cron behavior.
-
-Config-file scheduler wakeups are normalized as internal `wake` events and go through the same Pi RPC and agent-callable send path as Feishu messages. The active Pi session receives the configured prompt with the same instruction to call `pi-personal send --stdin` for visible Feishu replies and `pi-personal return --stdin` for parent/main-session reports; `pi-personal send` uses the bound Feishu chat.
-
-Agents can create and edit persisted runtime schedules with `pi-personal cron`. These schedules are stored under `runtime.stateDir/cron/registry.json`, survive daemon restarts, and are polled by the daemon:
-
-```bash
-pi-personal cron create --id hourly-note --cron "0 * * * *" --prompt "Hourly wakeup: inspect context and decide whether to send." --target main
-pi-personal cron create --id morning-check --cron "30 9 * * *" --prompt "Morning wakeup" --target main
-pi-personal cron create --id one-shot --at "2026-10-21T09:30:00+08:00" --prompt "One-shot wakeup" --target new
-pi-personal cron create --id shadow-self --cron "0 */2 * * *" --prompt "Shadow self heartbeat" --target session:shadow-self
-pi-personal cron list
-pi-personal cron status hourly-note
-pi-personal cron update hourly-note --prompt "Updated hourly prompt" --target session:research-1
-pi-personal cron disable hourly-note
-pi-personal cron delete hourly-note
-```
-
-Runtime cron target sessions run silently by default. Cron completion alone does not notify the main Pi session. A cron target session has two explicit output paths: call `pi-personal send --stdin` to message the bound Feishu chat, or call `pi-personal return --stdin` to queue a report to the parent/main Pi session.
-
-Runtime cron targets:
-
-- `--target main`: enqueue an internal wake event into the main daemon Pi RPC session.
-- `--target new`: create a new local Pi session and send the prompt there with completion returns disabled.
-- `--target session:<id>`: use one fixed child Pi session with completion returns disabled. If the personal session `<id>` exists, the daemon sends the prompt there and refreshes parent metadata for explicit `pi-personal return`; if it is missing, the daemon creates it with session id `<id>` and reuses it on future fires.
-- `--target-session <id>`: alias for `--target session:<id>`.
-
-Use fixed child sessions for recurring personas or work streams that should keep their own Pi history, for example `--target session:shadow-self` for a recurring shadow-self heartbeat.
-
-One-shot schedules use `--at <timestamp>` and complete automatically after firing. Recurring schedules use `--cron <expr>` and stay scheduled after each successful fire. `--stdin` can replace `--prompt <text>` for longer prompts.
-
-## Real Feishu wiring notes
-
-The HTTP receiver handles Feishu URL verification (`type=url_verification`), Feishu event callback v2 message shape, plaintext verification-token checking, and encrypted callback decryption with `FEISHU_ENCRYPT_KEY`.
-
-To use real Feishu text sending, set `sender.type` to `feishu` and configure credentials through `config.json` or env:
+Config wakeups accept an interval or standard five-field cron subset:
 
 ```json
 {
-  "sender": { "type": "feishu", "mockOutbox": "./outbox.jsonl" },
-  "feishu": {
-    "appId": "cli_xxx",
-    "appSecret": "xxx",
-    "verificationToken": "xxx",
-    "encryptKey": "xxx",
-    "baseUrl": "https://open.feishu.cn"
+  "scheduler": {
+    "enabled": true,
+    "wakeups": [
+      { "id": "hourly", "intervalMs": 3600000, "prompt": "Inspect context and decide whether to send." },
+      { "id": "morning", "cron": "30 9 * * *", "prompt": "Morning review." }
+    ]
   }
 }
 ```
 
-`FeishuSender` fetches `/open-apis/auth/v3/tenant_access_token/internal`, caches the tenant token, and sends interactive cards through `/open-apis/im/v1/messages?receive_id_type=chat_id` with payload shape `{ receive_id, msg_type: "interactive", content: JSON.stringify({ schema: "2.0", config: { update_multi: true, width_mode: "fill" }, body: { direction: "vertical", elements: [{ tag: "markdown", content: markdownBody }, { tag: "hr" }, { tag: "markdown", content: greyFooter }] } }) }`. The bound Feishu chat id is stored at `runtime.stateDir/feishu-chat-binding.json` or `~/.cache/pi-personal-daemon/feishu-chat-binding.json`.
+Supported fields: `minute hour day-of-month month day-of-week`; `*`, `*/n`, numbers, comma lists. Sunday is `0` or `7`. Specific day-of-month and day-of-week use OR matching. Dates use the machine's local timezone. Ranges/names/seconds/macros are not supported. Long waits are split into bounded timers and the actual due time is checked before firing.
 
-Real deployment still needs:
+Persisted runtime schedules:
 
-1. Configure Feishu app event subscription URL to `http(s)://host/feishu/webhook`.
-2. Expose the local daemon through a trusted HTTPS endpoint or tunnel.
-3. Grant the bot IM send/receive scopes in the Feishu app console.
-4. Persist delivery state across daemon restarts.
-5. Add richer handling for reply-by-message-id, attachments, images, and mentions.
+```bash
+pi-personal cron create --id hourly --cron '0 * * * *' --prompt 'Hourly wakeup' --target main
+pi-personal cron create --id one-shot --at '2026-11-01T09:30:00+08:00' --prompt 'One-shot task' --target new
+pi-personal cron create --id shadow --cron '0 */2 * * *' --prompt 'Heartbeat' --target session:research-1
+pi-personal cron list
+pi-personal cron status hourly
+pi-personal cron update hourly --prompt 'Updated prompt'
+pi-personal cron disable hourly
+pi-personal cron delete hourly
+```
 
-## Limitations
+- `main`: enqueue a wake into main.
+- `new`: create a child with the default agent profile.
+- `session:<id>`: reuse the stored agent choice of that child, or create it with defaults when missing. `--target-session <id>` is an alias.
+- Child/fixed cron targets run with completion returns off but keep explicit `send` / `return` metadata.
+- A successful async dispatch means launch accepted, not that the child has finished. Child status records the actual execution outcome.
+- One-shots complete after dispatch; recurring records calculate their next occurrence. Each claim has a run token, so a late completion cannot modify a deleted/recreated cron with the same ID.
+- A persisted `running` cron found at startup becomes failed and disabled, with an interruption error. It is not silently replayed, including recurring schedules. Inspect it and explicitly update with `--enabled` to resume. Verify one-shot timing before retrying.
+- A busy fixed session rejects the launch rather than creating overlapping work; inspect cron/session errors to decide the next action.
 
-- Real Feishu sending currently covers markdown interactive cards to chat only.
-- `pi-personal send` requires a bound Feishu chat. Real Feishu inbound messages auto-bind the first chat; local/mock-only flows can use `pi-personal bind feishu-chat --chat-id <chat_id>`.
-- `pi-personal return` requires parent callback metadata from a returned session or cron-created child/fixed session.
-- HTTP auth is minimal and suitable for local testing only.
-- Event processing is serialized in memory; pending events are lost if the process exits.
-- The scheduler supports `intervalMs`, persisted one-shot runtime schedules, and a small 5-field cron subset: `*`, `*/n`, numbers, and comma lists.
-- Pi RPC timeout/error handling is intentionally small.
-- Attachments, images, mentions, and group-specific behavior are normalized as text only in this prototype.
+## Main RPC reliability
+
+Pi commands have a response deadline (30 seconds by default, configurable with `commandTimeoutMs` in the Pi profile or legacy `agent` config), distinct from agent completion (10 minutes by default). Spawn/write/exit/close/timeout clean up pending commands and settled waiters. A timeout terminates the uncertain process; replacement waits for its exit rather than overlapping on the same session. Context occupancy derives only from meaningful token/context fields, not message counts or output-token limits.
+
+## Source layout
+
+- `src/channels.ts`, `src/output-binding.ts` — static channel boundary and fixed output access.
+- `src/agents/` — backend capabilities, configuration selection, Pi/mock/process adapters.
+- `src/session-service.ts`, `src/process-paths.ts`, `src/process-control.ts` — shared execution, installed subprocess paths/environment, and owned process-group cancellation.
+- `src/state-db.ts`, `src/state-paths.ts` — SQLite schema, migration, transactions and paths.
+- `src/session-registry.ts`, `src/cron-registry.ts`, `src/runtime-context.ts`, `src/feishu-binding.ts`, `src/session-callbacks.ts` — state repositories.
+- `src/daemon.ts` — main event processing and callback acknowledgment.
+- `src/sessions-cli.ts`, `src/cron-cli.ts`, `src/send-command.ts`, `src/return-command.ts` — CLI surfaces.
+- `src/session-watcher.ts` — async supervisor.
+- `src/pi-runner.ts`, `src/scheduler.ts` — RPC and config wakeups.
+- `src/events.ts`, `src/receivers.ts`, `src/feishu-ws.ts`, `src/sender.ts` — normalization and existing Feishu transport.
+- `test/` — storage, process lifecycle, scheduler, backend/channel, session and smoke coverage.
+
+## Remaining limits
+
+One daemon is supported per state directory; there is no multi-daemon lease system. Ordinary incoming events still queue in memory and can be lost on exit; persisted callbacks have the retry policy above. Unix harness cancellation covers the owned process group; a harness that deliberately creates a separate detached group is outside that guarantee. Feishu supports text/markdown cards and reactions, not full attachment/media workflows. Webhook authentication remains the existing local-deployment design. There is no arbitrary parent-session router, hot-loaded plugin system, or backend-history migration.
