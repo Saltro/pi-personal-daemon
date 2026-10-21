@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createMainAgentRunner, resolveAgentProfile, sessionAgentProcess } from '../src/agents/index.js';
+import '../src/extensions/index.js';
+import { createMainAgentRunner, resolveAgentProfile, sessionAgentProcess } from '../src/core/agents/registry.js';
 import { loadConfig } from '../src/config.js';
-import { absoluteConfigPath, agentProcessEnv, helperBinDirectory } from '../src/process-paths.js';
+import { absoluteConfigPath, agentProcessEnv, helperBinDirectory } from '../src/core/runtime/process-paths.js';
 import { spawnSync } from 'node:child_process';
-import { newSessionRecord } from '../src/session-registry.js';
-import { selectSessionAgent } from '../src/session-service.js';
+import { newSessionRecord } from '../src/core/sessions/registry.js';
+import { selectSessionAgent } from '../src/core/sessions/service.js';
 import type { AppConfig, ProcessAgentProfile } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-agents-'));

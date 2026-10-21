@@ -8,8 +8,8 @@ import { PassThrough, Writable } from 'node:stream';
 import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { agentProcessDetached, agentProcessGroupAlive } from '../src/process-control.js';
-import { PiRpcRunner, type PiRpcRunnerOptions } from '../src/pi-runner.js';
+import { agentProcessDetached, agentProcessGroupAlive } from '../src/core/runtime/process-control.js';
+import { PiRpcRunner, type PiRpcRunnerOptions } from '../src/extensions/pi/runner.js';
 import type { AppConfig } from '../src/types.js';
 
 interface CommandRecord {
@@ -466,7 +466,8 @@ for (const mode of ['timeout', 'leader-exit', 'ignored-pipes'] as const) {
     appConfig.agent.piBin = executable;
     const children: ChildProcessWithoutNullStreams[] = [];
     const runner = new PiRpcRunner(appConfig, {
-      commandTimeoutMs: 2000,
+      // Bounds the startup handshake only; the timeout mode still rejects on settle.
+      commandTimeoutMs: 6000,
       settledTimeoutMs: 25,
       spawn: (command, args, options) => {
         assert.equal(options.detached, true);

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import './extensions/index.js';
 import { loadConfig } from './config.js';
-import { PersonalDaemon } from './daemon.js';
-import { runBindCli } from './bind-cli.js';
-import { runCronCli } from './cron-cli.js';
-import { runReturnCli } from './return-command.js';
-import { runSendCli } from './send-command.js';
-import { runSessionsCli } from './sessions-cli.js';
+import { PersonalDaemon } from './core/daemon/daemon.js';
+import { runBindCli } from './cli/bind.js';
+import { runCronCli } from './cli/cron.js';
+import { runReturnCli } from './cli/return.js';
+import { runSendCli } from './cli/send.js';
+import { runSessionsCli } from './cli/sessions.js';
 
 function usage(exitCode: number): never {
   console.error(`Usage:

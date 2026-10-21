@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import './extensions/agents.js';
 import path from 'node:path';
 import { loadConfig } from './config.js';
-import { executeSessionRun } from './session-service.js';
+import { executeSessionRun } from './core/sessions/service.js';
 import type { AppConfig } from './types.js';
 
 function arg(name: string): string | undefined {

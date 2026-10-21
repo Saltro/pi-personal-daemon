@@ -1,14 +1,15 @@
+import '../src/extensions/index.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { deleteCron, getCron, makeRuntimeCron, putCron } from '../src/cron-registry.js';
-import { dispatchRuntimeCron, dueRuntimeCrons, markRuntimeCronRunning, RuntimeCronDispatcher } from '../src/runtime-cron-dispatch.js';
-import { claimSessionRun, getSession, insertSession, loadRegistry, newSessionRecord, putSession, refreshSessionStatus, updateSessionRun } from '../src/session-registry.js';
-import { finishSessionRun, runSessionPrompt, selectSessionAgent } from '../src/session-service.js';
-import { listParentNotifications } from '../src/session-callbacks.js';
+import { deleteCron, getCron, makeRuntimeCron, putCron } from '../src/core/cron/registry.js';
+import { dispatchRuntimeCron, dueRuntimeCrons, markRuntimeCronRunning, RuntimeCronDispatcher } from '../src/core/cron/dispatch.js';
+import { claimSessionRun, getSession, insertSession, loadRegistry, newSessionRecord, putSession, refreshSessionStatus, updateSessionRun } from '../src/core/sessions/registry.js';
+import { finishSessionRun, runSessionPrompt, selectSessionAgent } from '../src/core/sessions/service.js';
+import { listParentNotifications } from '../src/core/sessions/callbacks.js';
 import type { AppConfig } from '../src/types.js';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

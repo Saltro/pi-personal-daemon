@@ -3,18 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { PersonalDaemon } from '../src/daemon.js';
-import { createMainAgentRunner } from '../src/agents/index.js';
-import { normalizeInbound } from '../src/events.js';
-import { loadCronRegistry, saveCronRegistry } from '../src/cron-registry.js';
-import { readFeishuChatBinding } from '../src/feishu-binding.js';
-import { readCurrentContext } from '../src/runtime-context.js';
-import { loadRegistry } from '../src/session-registry.js';
-import { listParentNotifications } from '../src/session-callbacks.js';
-import { extractContextUsage } from '../src/pi-runner.js';
-import { RuntimeCronDispatcher } from '../src/runtime-cron-dispatch.js';
-import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/scheduler.js';
-import { isValidFeishuToken } from '../src/receivers.js';
+import '../src/extensions/index.js';
+import { PersonalDaemon } from '../src/core/daemon/daemon.js';
+import { createMainAgentRunner } from '../src/core/agents/registry.js';
+import { normalizeInbound } from '../src/core/events.js';
+import { loadCronRegistry, saveCronRegistry } from '../src/core/cron/registry.js';
+import { readFeishuChatBinding } from '../src/core/state/binding.js';
+import { readCurrentContext } from '../src/core/state/context.js';
+import { loadRegistry } from '../src/core/sessions/registry.js';
+import { listParentNotifications } from '../src/core/sessions/callbacks.js';
+import { extractContextUsage } from '../src/extensions/pi/runner.js';
+import { RuntimeCronDispatcher } from '../src/core/cron/dispatch.js';
+import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/core/cron/scheduler.js';
+import { isValidFeishuToken } from '../src/extensions/feishu/webhook.js';
+import { normalizeFeishuInbound } from '../src/extensions/feishu/normalize.js';
 import type { AppConfig } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-daemon-'));
@@ -258,7 +260,7 @@ steerDaemon.stop();
 console.log('smoke ok', outbox);
 
 function feishuMessage(id: string, messageId: string, text: string) {
-  return normalizeInbound({
+  return normalizeFeishuInbound({
     schema: '2.0', header: { event_id: id, event_type: 'im.message.receive_v1' },
     event: { sender: { sender_id: { open_id: 'ou-test' } }, message: { message_id: messageId, chat_id: 'oc-test', message_type: 'text', content: JSON.stringify({ text }) } },
   }, 'test-feishu');

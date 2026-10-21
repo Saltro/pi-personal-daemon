@@ -8,23 +8,23 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   claimSessionRun, finishSessionRun, finishSessionRunAndReturn, getSession, insertSession, loadRegistry, newSessionRecord,
   putSession, refreshSessionStatus, saveRegistry, updateSessionRun,
-} from '../src/session-registry.js';
+} from '../src/core/sessions/registry.js';
 import {
   claimCronRun, deleteCron, finishCronRun, getCron, loadCronRegistry, makeRuntimeCron,
   patchCron, patchCronRun, putCron, recoverRunningCrons, saveCronRegistry,
-} from '../src/cron-registry.js';
+} from '../src/core/cron/registry.js';
 import {
   readCurrentContext, recordContextSend, recordContextUsage, writeCurrentContext,
-} from '../src/runtime-context.js';
-import { ensureFeishuChatBinding, readFeishuChatBinding, writeFeishuChatBinding } from '../src/feishu-binding.js';
+} from '../src/core/state/context.js';
+import { ensureFeishuChatBinding, readFeishuChatBinding, writeFeishuChatBinding } from '../src/core/state/binding.js';
 import {
   acknowledgeParentNotification, callbackQueuePath, claimParentNotifications, drainParentNotifications,
   listParentNotifications, noticeToInbound, recoverParentNotifications, releaseParentNotification,
   writeParentNotification, writeParentReturnNotification,
-} from '../src/session-callbacks.js';
-import { agentProcessDetached, agentProcessGroupAlive } from '../src/process-control.js';
-import { closeStateDb, getStateDb, stateTransaction } from '../src/state-db.js';
-import { defaultStateDir, stateDbPath, stateDir } from '../src/state-paths.js';
+} from '../src/core/sessions/callbacks.js';
+import { agentProcessDetached, agentProcessGroupAlive } from '../src/core/runtime/process-control.js';
+import { closeStateDb, getStateDb, stateTransaction } from '../src/core/state/db.js';
+import { defaultStateDir, stateDbPath, stateDir } from '../src/core/state/paths.js';
 import type { AppConfig, InboundEvent } from '../src/types.js';
 
 const worker = process.argv[2] === 'worker';

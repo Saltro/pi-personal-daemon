@@ -59,7 +59,7 @@ Common overrides: `PI_DAEMON_SESSION_ID`, `PI_DAEMON_CWD`, `PI_BIN`, `PI_DAEMON_
 
 `stdin.enabled` remains an optional input source with either adapter. Feishu `eventMode` accepts `ws`, `webhook`, or both via the existing configuration. Real Feishu sending needs `sender.type=feishu` and app credentials. Webhook verification / encrypted payload handling remains in the Feishu receiver.
 
-The static registry in `src/channels.ts` defines the adapter boundary: receiver lifecycle, sender, binding behavior, debounce, and dedupe. Register new adapters in application code so daemon and CLI bundles load the same registration. No dynamic plugin loader or multi-chat routing is involved.
+The static registry in `src/core/channels/registry.ts` defines the adapter boundary: receiver lifecycle, sender, binding behavior, debounce, and dedupe. Implementations live in `src/extensions/` and are registered once by `src/extensions/channels.ts`. Registration is compiled in, so every entry bundle loads the same adapters; there is no dynamic plugin loader or multi-chat routing.
 
 ### Agent profiles
 
@@ -99,7 +99,7 @@ Built-in backends:
 
 `sessions create --agent <profile>` saves the chosen profile and resolved options. Later sends and fixed-session crons retain that selection even if global defaults change. Imported sessions without an agent selection use the legacy `agent` Pi/mock settings, not a newly selected main profile; retain those settings when switching main to another backend. There is no automatic cross-backend history migration. New sessions without `--agent` use the main/default profile.
 
-The static agent registry and capability contract are in `src/agents/`. Add a backend there rather than teaching the core to imitate a backend's CLI protocol. A main backend without steer simply queues subsequent user-message batches instead of attempting unsupported steering.
+The capability contract and selection logic are in `src/core/agents/`. Backends live in `src/extensions/` and are registered by `src/extensions/agents.ts`, which the daemon, CLI, and session supervisor each import. Add a backend there rather than teaching the core to imitate a backend's CLI protocol. A main backend without steer simply queues subsequent user-message batches instead of attempting unsupported steering.
 
 ## Fixed output and returns
 
@@ -214,17 +214,35 @@ Pi commands have a response deadline (30 seconds by default, configurable with `
 
 ## Source layout
 
-- `src/channels.ts`, `src/output-binding.ts` — static channel boundary and fixed output access.
-- `src/agents/` — backend capabilities, configuration selection, Pi/mock/process adapters.
-- `src/session-service.ts`, `src/process-paths.ts`, `src/process-control.ts` — shared execution, installed subprocess paths/environment, and owned process-group cancellation.
-- `src/state-db.ts`, `src/state-paths.ts` — SQLite schema, migration, transactions and paths.
-- `src/session-registry.ts`, `src/cron-registry.ts`, `src/runtime-context.ts`, `src/feishu-binding.ts`, `src/session-callbacks.ts` — state repositories.
-- `src/daemon.ts` — main event processing and callback acknowledgment.
-- `src/sessions-cli.ts`, `src/cron-cli.ts`, `src/send-command.ts`, `src/return-command.ts` — CLI surfaces.
-- `src/session-watcher.ts` — async supervisor.
-- `src/pi-runner.ts`, `src/scheduler.ts` — RPC and config wakeups.
-- `src/events.ts`, `src/receivers.ts`, `src/feishu-ws.ts`, `src/sender.ts` — normalization and existing Feishu transport.
-- `test/` — storage, process lifecycle, scheduler, backend/channel, session and smoke coverage.
+```
+src/
+  index.ts                 single entry: daemon, or one CLI subcommand
+  session-watcher.ts       supervised async session entry
+  cli/                     send, return, bind, sessions, cron
+  config.ts  types.ts      configuration schema and shared types
+  core/                    backend-agnostic engine
+    daemon/                event queue, debounce, reactions, callback delivery
+    events.ts              inbound normalization and agent prompt framing
+    channels/registry.ts   channel contract and factory registry
+    agents/                backend contract, profile resolution, registration
+    sessions/              records, supervised execution, returns
+    cron/                  cron parsing, persisted schedules, runtime dispatch
+    state/                 SQLite schema/transactions, binding, current context
+    runtime/               subprocess paths/env and owned process-group control
+    input/stdin.ts         optional stdin input source
+  extensions/              compiled-in channel and agent implementations
+    index.ts               registers both groups; used by the daemon and CLI
+    agents.ts              agent-only registration for the session supervisor
+    channels.ts            channel-only registration
+    feishu/                channel, WebSocket/webhook receivers, sender, normalization
+    stdio/                 terminal channel
+    pi/                    adapter and JSON-lines RPC runner
+    process/               external harness adapter
+    mock/                  deterministic test adapter
+test/                      storage, process lifecycle, scheduler, backend/channel, session and smoke coverage
+```
+
+`src/core/` never imports Feishu or Pi specifics; `src/extensions/` may import core contracts. The supervisor imports `src/extensions/agents.ts` only, so session runs do not load the Feishu SDK. Each entry builds into a single self-contained file, so no runtime chunk resolution is involved.
 
 ## Remaining limits
 

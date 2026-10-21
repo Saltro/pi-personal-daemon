@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/scheduler.js';
-import type { WakeupSchedulerOptions } from '../src/scheduler.js';
+import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/core/cron/scheduler.js';
+import type { WakeupSchedulerOptions } from '../src/core/cron/scheduler.js';
 import type { AppConfig, InboundEvent, WakeupConfig } from '../src/types.js';
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
