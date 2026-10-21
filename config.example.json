@@ -1,7 +1,7 @@
 {
   "agent": {
     "sessionId": "personal-agent",
-    "cwd": "~",
+    "cwd": "/tmp/pi-personal-daemon-workspace",
     "piBin": "pi",
     "extraArgs": ["--no-approve"],
     "mock": false
@@ -37,7 +37,7 @@
   },
   "sender": {
     "type": "mock",
-    "mockOutbox": "~/pi-personal-daemon/outbox.jsonl"
+    "mockOutbox": "/tmp/pi-personal-daemon-workspace/pi-personal-daemon/outbox.jsonl"
   },
   "feishu": {
     "appId": "",
@@ -49,7 +49,7 @@
   },
   "runtime": {
     "contextFile": "/tmp/pi-personal-daemon-current-context.json",
-    "stateDir": "~/.cache/pi-personal-daemon"
+    "stateDir": "/tmp/pi-personal-daemon-workspace/.cache/pi-personal-daemon"
   },
   "scheduler": {
     "enabled": true,
