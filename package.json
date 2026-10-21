@@ -8,6 +8,7 @@
     "pi-personal-daemon": "./dist/index.js"
   },
   "description": "Minimal single-agent Feishu to Pi daemon prototype",
+  "packageManager": "pnpm@10.34.4",
   "scripts": {
     "build": "rsbuild build && node scripts/fix-bin.js",
     "typecheck": "tsc --noEmit",
@@ -16,7 +17,7 @@
     "smoke": "tsx test/smoke.ts"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.76.0"
