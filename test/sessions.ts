@@ -8,6 +8,7 @@ import { deleteCron, getCron, makeRuntimeCron, putCron } from '../src/cron-regis
 import { dispatchRuntimeCron, dueRuntimeCrons, markRuntimeCronRunning, RuntimeCronDispatcher } from '../src/runtime-cron-dispatch.js';
 import { claimSessionRun, getSession, insertSession, loadRegistry, newSessionRecord, putSession, refreshSessionStatus, updateSessionRun } from '../src/session-registry.js';
 import { finishSessionRun, runSessionPrompt, selectSessionAgent } from '../src/session-service.js';
+import { listParentNotifications } from '../src/session-callbacks.js';
 import type { AppConfig } from '../src/types.js';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,15 +41,18 @@ const config: AppConfig = {
   scheduler: { enabled: false, wakeups: [] },
   runtime: { stateDir: path.join(tmp, 'state'), configPath },
 };
+const returnHarness = path.join(tmp, 'return-harness.cjs');
+fs.writeFileSync(returnHarness, `const {execFileSync}=require('node:child_process');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{execFileSync(process.execPath,[${JSON.stringify(path.join(project, 'dist', 'cli.js'))},'return','--stdin'],{input:prompt,stdio:['pipe','pipe','inherit']});console.log('explicit return queued');});`);
+config.agentProfiles!.returns = { backend: 'process', command: process.execPath, args: [returnHarness] };
 fs.writeFileSync(configPath, JSON.stringify(config));
 const cli = path.join(project, 'dist', 'cli.js');
 const env: NodeJS.ProcessEnv = { ...process.env, PERSONAL_DAEMON_CONFIG: configPath };
-for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'PI_PERSONAL_PARENT_CALLBACK', 'PI_DAEMON_AGENT_PROFILE', 'PI_DAEMON_MOCK', 'PI_DAEMON_STATE_DIR']) delete env[key];
-function command(args: string[]) {
-  return spawnSync(process.execPath, [cli, 'sessions', ...args], { cwd: foreignCwd, encoding: 'utf8', env, timeout: 15_000 });
+for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'PI_PERSONAL_SESSION_ID', 'PI_PERSONAL_PARENT_CALLBACK', 'PI_DAEMON_AGENT_PROFILE', 'PI_DAEMON_MOCK', 'PI_DAEMON_STATE_DIR']) delete env[key];
+function command(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
+  return spawnSync(process.execPath, [cli, 'sessions', ...args], { cwd: foreignCwd, encoding: 'utf8', env: { ...env, ...extraEnv }, timeout: 15_000 });
 }
-function success(args: string[]) {
-  const result = command(args);
+function success(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
+  const result = command(args, extraEnv);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -63,6 +67,39 @@ async function settled(id: string) {
 }
 try {
   assert.ok(fs.existsSync(cli), 'build before running sessions tests');
+  for (const [wait, flag] of [[true, '--no-return'], [false, '--no-notify']] as const) {
+    const id = `explicit-${wait}`;
+    const parentEnv = { PI_SESSION_ID: 'main' };
+    const created = success(['create', '--id', id, '--agent', 'returns', '--prompt', `create ${id}`, flag, ...(wait ? ['--wait'] : [])], parentEnv);
+    assert.equal(created.notify, false);
+    assert.equal(created.parentCallback.sessionId, 'main');
+    assert.equal((await settled(id)).status, 'completed');
+    const continued = success(['send', id, '--message', `continue ${id}`, flag, '--wait']);
+    assert.equal(continued.notify, false);
+    assert.deepEqual(continued.parentCallback, created.parentCallback);
+    const notices = listParentNotifications(config).filter(notice => notice.child?.id === id);
+    assert.equal(notices.length, 2, 'create/send must enqueue only the explicit returns');
+    assert.ok(notices.every(notice => notice.type === 'session.return' && notice.parent.sessionId === 'main'));
+    assert.equal(continued.parentNotificationPath, undefined);
+    const fallback = spawnSync(process.execPath, [cli, 'return', '--stdin'], {
+      cwd: foreignCwd, encoding: 'utf8', input: `registry fallback ${id}`, env: { ...env, PI_PERSONAL_SESSION_ID: id }, timeout: 15_000,
+    });
+    assert.equal(fallback.status, 0, fallback.stderr);
+    assert.equal(listParentNotifications(config).filter(notice => notice.child?.id === id).length, 3);
+  }
+  const repairedId = 'repair-missing-parent';
+  success(['create', '--id', repairedId, '--agent', 'returns', '--no-return']);
+  const repaired = success(['send', repairedId, '--message', 'repair callback', '--wait'], { PI_SESSION_ID: 'main' });
+  assert.equal(repaired.notify, false);
+  assert.equal(repaired.parentCallback.sessionId, 'main');
+  const repairedNotices = listParentNotifications(config).filter(notice => notice.child?.id === repairedId);
+  assert.equal(repairedNotices.length, 1);
+  assert.equal(repairedNotices[0].type, 'session.return');
+  const automatic = success(['send', repairedId, '--message', 'also complete', '--return', '--wait']);
+  assert.equal(automatic.notify, true);
+  assert.equal(automatic.parentCallback.sessionId, 'main');
+  assert.deepEqual(listParentNotifications(config).filter(notice => notice.child?.id === repairedId).map(notice => notice.type), ['session.return', 'session.return', 'session.completed']);
+
   const named = success(['create', '--id', 'named', '--agent', 'fast', '--prompt', 'first', '--wait']);
   assert.equal(named.agentProfile, 'fast');
   assert.equal(named.agentProfileSnapshot.backend, 'mock');

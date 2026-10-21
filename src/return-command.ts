@@ -28,7 +28,7 @@ export async function runReturnCli(args: string[], command = 'pi-personal return
 
   const config = loadConfig();
   const parent = findParentCallback(config);
-  if (!parent) throw new Error('parent callback metadata not found; run from a pi-personal session created/sent with --return or a cron target session');
+  if (!parent) throw new Error('parent callback metadata not found; create or send the child from a parent agent session, or run from a cron target session; --return only controls automatic completion notices');
   const file = writeParentReturnNotification(config, parent, text, process.env.PI_PERSONAL_SESSION_ID || process.env.PI_SESSION_ID);
   console.error(`[${command}] queued parent return ${file}`);
 }

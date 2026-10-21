@@ -77,10 +77,6 @@ async function promptFromOptions(opts: ParsedOptions, key: 'prompt' | 'message')
   return text || undefined;
 }
 
-function defaultNotify(config: AppConfig): boolean {
-  return Boolean(detectParentCallback(config));
-}
-
 export async function runSessionsCli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
   const config = loadConfig();
@@ -94,14 +90,15 @@ export async function runSessionsCli(args: string[]): Promise<void> {
 
 async function createSession(config: AppConfig, opts: ParsedOptions): Promise<void> {
   const id = opts.id || makeSessionId();
-  const notify = opts.notify ?? defaultNotify(config);
+  const parentCallback = detectParentCallback(config);
+  const notify = opts.notify ?? Boolean(parentCallback);
   const prompt = await promptFromOptions(opts, 'prompt');
   let record = newSessionRecord(config, {
     id,
     cwd: opts.cwd,
     name: opts.name,
     notify,
-    parentCallback: notify ? detectParentCallback(config) : undefined,
+    parentCallback,
     prompt,
   });
   record = selectSessionAgent(config, record, opts.agent, opts.cwd);
@@ -117,10 +114,8 @@ async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void
   const prompt = await promptFromOptions(opts, 'message');
   if (!prompt) throw new Error('sessions send requires --message or --stdin');
   let record = getSession(config, id);
-  if (opts.notify !== undefined) {
-    record.notify = opts.notify;
-    record.parentCallback = opts.notify ? detectParentCallback(config) : undefined;
-  }
+  if (opts.notify !== undefined) record.notify = opts.notify;
+  record.parentCallback = detectParentCallback(config) ?? record.parentCallback;
   record = await runSessionPrompt(config, record, prompt, Boolean(opts.wait));
   console.log(JSON.stringify(record, null, 2));
 }
