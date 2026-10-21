@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { deleteCron, getCron, makeRuntimeCron, putCron } from '../src/core/cron/registry.js';
 import { dispatchRuntimeCron, dueRuntimeCrons, markRuntimeCronRunning, RuntimeCronDispatcher } from '../src/core/cron/dispatch.js';
 import { claimSessionRun, getSession, insertSession, loadRegistry, newSessionRecord, putSession, refreshSessionStatus, updateSessionRun } from '../src/core/sessions/registry.js';
-import { finishSessionRun, runSessionPrompt, selectSessionAgent } from '../src/core/sessions/service.js';
+import { finishSessionRun, ownedFailedWorkerPid, runSessionPrompt, selectSessionAgent } from '../src/core/sessions/service.js';
+import { agentProcessGroupAlive } from '../src/core/runtime/process-control.js';
 import { listParentNotifications } from '../src/core/sessions/callbacks.js';
 import type { AppConfig } from '../src/types.js';
 
@@ -34,6 +35,7 @@ const config: AppConfig = {
     timeout: { backend: 'process', command: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'], timeoutMs: 50 },
     tree: { backend: 'process', command: process.execPath, args: [treeHarness], timeoutMs: 200 },
     unicode: { backend: 'process', command: process.execPath, args: [unicodeHarness] },
+    hang: { backend: 'process', command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'] },
   },
   http: { enabled: false, host: '127.0.0.1', port: 0, path: '/' },
   stdin: { enabled: false },
@@ -309,6 +311,87 @@ try {
   assert.equal(getCron(config, heldId).status, 'scheduled');
   assert.equal(getCron(config, heldId).enabled, true);
   assert.equal(getCron(config, heldId).nextRunAt, replacement.nextRunAt);
+  assert.equal(
+    ownedFailedWorkerPid({ runId: 'run', pid: process.pid }, 'run', 4242),
+    undefined,
+    'pre-handshake placeholder pid belongs to the launcher and must not be signalled',
+  );
+  assert.equal(ownedFailedWorkerPid({ runId: 'run', pid: 1234, watcherPid: 4242 }, 'run', 4242), 1234);
+  assert.equal(ownedFailedWorkerPid({ runId: 'run', pid: 4242, watcherPid: 4242 }, 'run', 4242), undefined, 'handshake without a worker yet');
+  assert.equal(ownedFailedWorkerPid({ runId: 'old', pid: 1234, watcherPid: 4242 }, 'new', 4242), undefined, 'another run token owns nothing');
+
+  const launcherPath = path.join(tmp, 'pre-handshake-launcher.mts');
+  fs.writeFileSync(launcherPath, [
+    `import ${JSON.stringify(path.join(project, 'src/extensions/index.ts'))};`,
+    `import { loadConfig } from ${JSON.stringify(path.join(project, 'src/config.ts'))};`,
+    `import { insertSession, newSessionRecord } from ${JSON.stringify(path.join(project, 'src/core/sessions/registry.ts'))};`,
+    `import { runSessionPrompt, selectSessionAgent } from ${JSON.stringify(path.join(project, 'src/core/sessions/service.ts'))};`,
+    'const config = loadConfig();',
+    "const record = insertSession(config, selectSessionAgent(config, newSessionRecord(config, { id: 'pre-handshake', autoReturn: false }), 'plain'));",
+    "process.env.NODE_OPTIONS = '--require /nonexistent-pi-launcher-test.js';",
+    "try {",
+    "  await runSessionPrompt(config, record, 'watcher dies before ready', false);",
+    "  console.log('launcher unexpectedly succeeded');",
+    '  process.exitCode = 3;',
+    '} catch (error) {',
+    "  console.log('launcher survived:', error instanceof Error ? error.message : String(error));",
+    '}',
+  ].join('\n'));
+  const launcher = spawn(process.execPath, ['--import', path.join(project, 'node_modules/tsx/dist/loader.mjs'), launcherPath], {
+    cwd: tmp, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const launcherExit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }>(resolve => {
+    let output = '';
+    launcher.stdout!.setEncoding('utf8');
+    launcher.stderr!.setEncoding('utf8');
+    launcher.stdout!.on('data', chunk => { output += chunk; });
+    launcher.stderr!.on('data', chunk => { output += chunk; });
+    launcher.once('close', (code, signal) => resolve({ code, signal, output }));
+  });
+  assert.equal(launcherExit.signal, null, `a pre-handshake watcher failure must not kill the launcher: ${launcherExit.output}`);
+  assert.equal(launcherExit.code, 0, launcherExit.output);
+  assert.match(launcherExit.output, /launcher survived: .*exited during startup/);
+  const preHandshake = getSession(config, 'pre-handshake');
+  assert.equal(preHandshake.status, 'failed');
+  assert.match(preHandshake.error!, /exited during startup/);
+
+  const sigintCli = spawn(process.execPath, [cli, 'sessions', 'create', '--id', 'sigint-wait', '--agent', 'hang', '--prompt', 'cancel me', '--wait'], {
+    cwd: foreignCwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let cancelledPid: number | undefined;
+  try {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 10_000) {
+      const running = loadRegistry(config).sessions['sigint-wait'];
+      if (running?.status === 'running' && running.pid && running.pid !== sigintCli.pid) {
+        cancelledPid = running.pid;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.ok(cancelledPid, '--wait must record the agent pid');
+    assert.equal(sigintCli.kill('SIGINT'), true);
+    const sigintExit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }>(resolve => {
+      let output = '';
+      sigintCli.stdout!.setEncoding('utf8');
+      sigintCli.stderr!.setEncoding('utf8');
+      sigintCli.stdout!.on('data', chunk => { output += chunk; });
+      sigintCli.stderr!.on('data', chunk => { output += chunk; });
+      sigintCli.once('close', (code, signal) => resolve({ code, signal, output }));
+    });
+    assert.equal(sigintExit.signal, null, `Ctrl+C must not bypass cleanup: ${sigintExit.output}`);
+    assert.equal(sigintExit.code, 0, sigintExit.output);
+    const cancelled = getSession(config, 'sigint-wait');
+    assert.equal(cancelled.status, 'failed');
+    assert.match(cancelled.error!, /interrupted/);
+    assert.equal(agentProcessGroupAlive({ pid: cancelledPid }), false, 'cancelled agent group must be gone');
+  } finally {
+    if (cancelledPid && agentProcessGroupAlive({ pid: cancelledPid })) {
+      try { process.kill(-cancelledPid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+    if (sigintCli.exitCode === null && sigintCli.signalCode === null) sigintCli.kill('SIGKILL');
+  }
+
   console.log('sessions tests passed');
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

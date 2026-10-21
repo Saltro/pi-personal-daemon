@@ -14,11 +14,20 @@ class SessionStartupError extends Error {
   constructor(message: string, readonly keepRunning: boolean) { super(message); }
 }
 
+/**
+ * The watcher owns the worker: it writes its own pid at handshake and the worker pid afterwards.
+ * A record that has not reached the handshake still holds the launcher pid, which this launch must never signal.
+ */
+export function ownedFailedWorkerPid(record: Pick<PersonalSessionRecord, 'runId' | 'pid' | 'watcherPid'>, runId: string, watcherPid: number | undefined): number | undefined {
+  if (watcherPid === undefined || record.runId !== runId || record.watcherPid !== watcherPid) return undefined;
+  return record.pid !== watcherPid ? record.pid : undefined;
+}
+
 async function stopFailedWatcher(config: AppConfig, record: PersonalSessionRecord, runId: string, watcher: ReturnType<typeof spawn> | undefined): Promise<boolean> {
   if (!watcher?.pid) return true;
   // Child harnesses own a separate group; stop them before their detached supervisor.
   const current = getSession(config, record.id);
-  const childPid = current.runId === runId && current.pid !== watcher.pid ? current.pid : undefined;
+  const childPid = ownedFailedWorkerPid(current, runId, watcher.pid);
   if (childPid) {
     const child = { pid: childPid } as ReturnType<typeof spawn>;
     if (!signalAgentProcess(child, 'SIGKILL') || !await waitForAgentProcessExit(child)) return false;
@@ -159,7 +168,9 @@ async function executeSessionProcess(config: AppConfig, record: PersonalSessionR
     executionError ||= 'agent execution interrupted';
     if (child) signalAgentProcess(child, 'SIGKILL');
   };
-  process.once('SIGTERM', terminate);
+  // A terminal Ctrl+C must cancel the owned group and commit the failure before the CLI exits.
+  const cancelSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+  for (const signal of cancelSignals) process.once(signal, terminate);
   try {
     let output = '';
     const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
@@ -202,7 +213,7 @@ async function executeSessionProcess(config: AppConfig, record: PersonalSessionR
     const error = executionError || (result.signal ? `agent terminated by ${result.signal}` : result.code === 0 ? undefined : `agent exited code=${result.code}`);
     return finishSessionRun(config, record.id, runId, { status: result.code === 0 && !error ? 'completed' : 'failed', exitCode: result.code, error, lastResult: output.trim() });
   } finally {
-    process.removeListener('SIGTERM', terminate);
+    for (const signal of cancelSignals) process.removeListener(signal, terminate);
     if (deadlineTimer) clearTimeout(deadlineTimer);
   }
 }
