@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  claimSessionRun, finishSessionRun, finishSessionRunAndNotify, getSession, insertSession, loadRegistry, newSessionRecord,
+  claimSessionRun, finishSessionRun, finishSessionRunAndReturn, getSession, insertSession, loadRegistry, newSessionRecord,
   putSession, refreshSessionStatus, saveRegistry, updateSessionRun,
 } from '../src/session-registry.js';
 import {
@@ -54,14 +54,14 @@ if (worker) {
   } else if (action === 'callbacks') {
     process.stdout.write(String(claimParentNotifications(config).length));
   } else if (action === 'initialize') {
-    insertSession(config, newSessionRecord(config, { id: `init-${id}`, notify: false }));
+    insertSession(config, newSessionRecord(config, { id: `init-${id}`, autoReturn: false }));
   } else if (action === 'default-import') {
     // This worker runs with HOME pointing to a new temporary directory. Assert
     // the path before opening anything so a missing override cannot touch user state.
     assert.equal(config.runtime.stateDir, undefined);
     assert.equal(stateDir(config), path.join(id, '.cache', 'pi-personal-daemon'));
     const imported = getSession(config, 'legacy-child');
-    assert.equal(imported.notify, true);
+    assert.equal(imported.autoReturn, true);
     assert.equal(imported.logPath, path.join(stateDir(config), 'sessions', 'legacy-child.log'));
     assert.equal(getCron(config, 'legacy-cron').prompt, 'wake');
     assert.equal(readFeishuChatBinding(config)?.chatId, 'visible-fixed');
@@ -102,7 +102,8 @@ if (worker) {
     const legacy = configFor('legacy');
     const now = new Date().toISOString();
     const parent = { sessionId: 'old-parent', queuePath: callbackQueuePath(legacy, 'old-parent'), createdAt: now };
-    const legacySession = { ...newSessionRecord(legacy, { id: 'legacy-child', notify: true, parentCallback: parent }), notify: 'parent', callback: 'obsolete' };
+    const { autoReturn: _legacyAutoReturn, ...legacySessionFields } = newSessionRecord(legacy, { id: 'legacy-child', autoReturn: true, parentCallback: parent });
+    const legacySession = { ...legacySessionFields, notify: 'parent', callback: 'obsolete' };
     const legacyCron = makeRuntimeCron({ id: 'legacy-cron', prompt: 'wake', schedule: { type: 'cron', expression: '* * * * *' } });
     const legacyNotice = { type: 'session.return', id: 'legacy-notice', createdAt: now, parent, text: 'legacy result' };
     const sourceFiles = [
@@ -119,14 +120,18 @@ if (worker) {
     writeJson(sourceFiles[4], legacyNotice);
     fs.writeFileSync(legacySession.logPath, 'native session log retained');
     const original = sourceFiles.map(file => fs.readFileSync(file, 'utf8'));
-    assert.equal(getSession(legacy, 'legacy-child').notify, true);
+    assert.equal(getSession(legacy, 'legacy-child').autoReturn, true);
+    assert.equal('notify' in getSession(legacy, 'legacy-child'), false, 'legacy notify is import-only');
     assert.equal('callback' in getSession(legacy, 'legacy-child'), false);
     assert.equal(getCron(legacy, 'legacy-cron').prompt, 'wake');
     assert.equal(readFeishuChatBinding(legacy)?.chatId, 'visible-fixed');
     assert.equal(readCurrentContext(legacy).sendCount, 7);
     assert.equal(readCurrentContext(legacy).contextUsage, 'legacy usage');
     assert.deepEqual(listParentNotifications(legacy), [legacyNotice]);
-    assert.equal(getStateDb(legacy).prepare('PRAGMA user_version').get()?.user_version, 2);
+    assert.equal(getStateDb(legacy).prepare('PRAGMA user_version').get()?.user_version, 3);
+    const freshColumns = getStateDb(legacy).prepare('PRAGMA table_info(sessions)').all().map(column => column.name);
+    assert.ok(freshColumns.includes('autoReturn'));
+    assert.equal(freshColumns.includes('notify'), false, 'new SQLite schema uses only autoReturn');
     assert.equal(getStateDb(legacy).prepare('PRAGMA journal_mode').get()?.journal_mode, 'wal');
     assert.equal(getStateDb(legacy).prepare('PRAGMA busy_timeout').get()?.timeout, 5000);
     assert.ok(getStateDb(legacy).prepare("SELECT value FROM state_meta WHERE key='legacy-json-v1'").get());
@@ -138,32 +143,103 @@ if (worker) {
     assert.equal(listParentNotifications(legacy).length, 0, 'retained legacy callback must not reimport after restart');
     assert.equal(Number(getStateDb(legacy).prepare('SELECT count(*) AS n FROM sessions').get()?.n), 1);
 
-    const versionOne = configFor('schema-v1');
-    fs.mkdirSync(path.dirname(stateDbPath(versionOne)), { recursive: true });
-    const oldDb = new DatabaseSync(stateDbPath(versionOne));
-    oldDb.exec(`CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO state_meta VALUES ('legacy-json-v1', 'already-imported');
-      CREATE TABLE crons (
-        id TEXT PRIMARY KEY, prompt TEXT NOT NULL, scheduleType TEXT NOT NULL,
-        scheduleValue TEXT NOT NULL, target TEXT NOT NULL, enabled INTEGER NOT NULL,
-        status TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL,
-        lastFiredAt TEXT, nextRunAt TEXT, lastError TEXT
-      ); PRAGMA user_version = 1;`);
-    const migrationDue = new Date(Date.now() - 1000).toISOString();
-    oldDb.prepare('INSERT INTO crons(id,prompt,scheduleType,scheduleValue,target,enabled,status,createdAt,updatedAt,nextRunAt) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run('v1-cron', 'preserved v1 prompt', 'at', migrationDue, 'main', 1, 'scheduled', now, now, migrationDue);
-    oldDb.close();
-    assert.equal(getStateDb(versionOne).prepare('PRAGMA user_version').get()?.user_version, 2);
-    assert.equal(getCron(versionOne, 'v1-cron').prompt, 'preserved v1 prompt');
-    const migratedClaim = claimCronRun(versionOne, 'v1-cron')!;
-    assert.match(migratedClaim.runId!, /^[0-9a-f-]{36}$/);
-    assert.ok(finishCronRun(versionOne, 'v1-cron', migratedClaim.runId!, { status: 'completed', enabled: false }));
-    assert.equal(getCron(versionOne, 'v1-cron').runId, undefined);
-    closeStateDb(versionOne);
-    assert.equal(getStateDb(versionOne).prepare('PRAGMA user_version').get()?.user_version, 2, 'v2 schema reopens without repeated ALTER');
+    for (const version of [1, 2]) {
+      const migration = configFor(`schema-v${version}`);
+      fs.mkdirSync(path.dirname(stateDbPath(migration)), { recursive: true });
+      const oldDb = new DatabaseSync(stateDbPath(migration));
+      // Historical SQLite fixtures must use the real notify column, not autoReturn.
+      oldDb.exec(`CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO state_meta VALUES ('legacy-json-v1', 'already-imported');
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, sessionId TEXT NOT NULL, cwd TEXT NOT NULL, sessionDir TEXT, name TEXT,
+          status TEXT NOT NULL CHECK(status IN ('idle','running','completed','failed')),
+          pid INTEGER, watcherPid INTEGER, runId TEXT, agentProfile TEXT, agentProfileSnapshot TEXT,
+          notify INTEGER NOT NULL CHECK(notify IN (0,1)), parentCallback TEXT, parentNotificationPath TEXT,
+          createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastPrompt TEXT, lastResult TEXT,
+          logPath TEXT NOT NULL, exitCode INTEGER, error TEXT
+        );
+        CREATE TABLE crons (
+          id TEXT PRIMARY KEY, prompt TEXT NOT NULL, scheduleType TEXT NOT NULL,
+          scheduleValue TEXT NOT NULL, target TEXT NOT NULL, enabled INTEGER NOT NULL,
+          status TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL,
+          lastFiredAt TEXT, nextRunAt TEXT, lastError TEXT${version === 2 ? ', runId TEXT' : ''}
+        ); PRAGMA user_version = ${version};`);
+      const migrationParent = { sessionId: 'main', queuePath: callbackQueuePath(migration, 'main'), createdAt: now };
+      const migratedIds = [0, 1].map(value => `v${version}-return-${value}`);
+      for (const value of [0, 1]) {
+        oldDb.prepare('INSERT INTO sessions(id,sessionId,cwd,status,notify,parentCallback,agentProfile,agentProfileSnapshot,createdAt,updatedAt,lastResult,logPath) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(migratedIds[value], migratedIds[value], migration.agent.cwd, 'completed', value, JSON.stringify(migrationParent), 'saved-profile', JSON.stringify({ backend: 'mock' }), now, now, `preserved result ${value}`, path.join(stateDir(migration), 'sessions', `${migratedIds[value]}.log`));
+      }
+      assert.deepEqual(oldDb.prepare('SELECT notify FROM sessions ORDER BY id').all().map(row => row.notify), [0, 1]);
+      const oldColumns = oldDb.prepare('PRAGMA table_info(sessions)').all().map(column => column.name);
+      assert.ok(oldColumns.includes('notify'));
+      assert.equal(oldColumns.includes('autoReturn'), false);
+      const migrationDue = new Date(Date.now() - 1000).toISOString();
+      const cronId = `v${version}-cron`;
+      oldDb.prepare('INSERT INTO crons(id,prompt,scheduleType,scheduleValue,target,enabled,status,createdAt,updatedAt,nextRunAt) VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(cronId, `preserved v${version} prompt`, 'at', migrationDue, 'main', 1, 'scheduled', now, now, migrationDue);
+      oldDb.close();
+
+      const migratedDb = getStateDb(migration);
+      assert.equal(migratedDb.prepare('PRAGMA user_version').get()?.user_version, 3, `v${version} migrates to v3`);
+      const migratedColumns = migratedDb.prepare('PRAGMA table_info(sessions)').all().map(column => column.name);
+      assert.ok(migratedColumns.includes('autoReturn'));
+      assert.equal(migratedColumns.includes('notify'), false);
+      assert.deepEqual(migratedDb.prepare('SELECT autoReturn FROM sessions ORDER BY id').all().map(row => row.autoReturn), [0, 1], 'migration retains both stored booleans');
+      for (const value of [0, 1]) {
+        const migrated = getSession(migration, migratedIds[value]);
+        assert.equal(migrated.autoReturn, Boolean(value));
+        assert.equal(Object.hasOwn(migrated, 'notify'), false);
+        assert.equal(migrated.lastResult, `preserved result ${value}`);
+        assert.equal(migrated.agentProfile, 'saved-profile');
+        assert.deepEqual(migrated.agentProfileSnapshot, { backend: 'mock' });
+        assert.deepEqual(migrated.parentCallback, migrationParent);
+        assert.equal(migrated.createdAt, now);
+      }
+      assert.throws(() => migratedDb.prepare('UPDATE sessions SET autoReturn = 2 WHERE id = ?').run(migratedIds[0]), /CHECK constraint failed/, 'renamed boolean column retains its constraint');
+      assert.equal(getCron(migration, cronId).prompt, `preserved v${version} prompt`);
+      const migratedClaim = claimCronRun(migration, cronId)!;
+      assert.match(migratedClaim.runId!, /^[0-9a-f-]{36}$/);
+      assert.ok(finishCronRun(migration, cronId, migratedClaim.runId!, { status: 'completed', enabled: false }));
+      assert.equal(getCron(migration, cronId).runId, undefined);
+      closeStateDb(migration);
+      assert.equal(getStateDb(migration).prepare('PRAGMA user_version').get()?.user_version, 3, 'v3 schema reopens without repeated ALTER');
+      for (const value of [0, 1]) assert.equal(getSession(migration, migratedIds[value]).autoReturn, Boolean(value));
+      const changedReturn = getSession(migration, migratedIds[0]);
+      changedReturn.autoReturn = true;
+      putSession(migration, changedReturn);
+      assert.equal(getSession(migration, changedReturn.id).autoReturn, true, 'migrated records write through autoReturn');
+      assert.equal(getStateDb(migration).prepare('SELECT autoReturn FROM sessions WHERE id = ?').get(changedReturn.id)?.autoReturn, 1);
+    }
+
+    const legacyModes = configFor('legacy-return-modes');
+    const legacyModeRegistry: Record<string, object> = {};
+    const legacyModeCases = [
+      { id: 'boolean-true', notify: true, expected: true },
+      { id: 'boolean-false', notify: false, expected: false },
+      { id: 'parent-mode', notify: 'parent', expected: true },
+      { id: 'none-mode', notify: 'none', expected: false },
+      { id: 'feishu-mode', notify: 'feishu', expected: false },
+      { id: 'new-false-wins', notify: true, autoReturn: false, expected: false },
+      { id: 'new-true-wins', notify: false, autoReturn: true, expected: true },
+    ];
+    for (const { id, expected: _expected, ...fields } of legacyModeCases) {
+      const { autoReturn: _autoReturn, ...record } = newSessionRecord(legacyModes, { id, autoReturn: false });
+      legacyModeRegistry[id] = { ...record, ...fields };
+    }
+    const legacyModePath = path.join(stateDir(legacyModes), 'sessions', 'registry.json');
+    writeJson(legacyModePath, { sessions: legacyModeRegistry });
+    const originalModes = fs.readFileSync(legacyModePath, 'utf8');
+    for (const { id, expected } of legacyModeCases) {
+      const imported = getSession(legacyModes, id);
+      assert.equal(imported.autoReturn, expected, `legacy return setting ${id}`);
+      assert.equal(Object.hasOwn(imported, 'notify'), false);
+    }
+    assert.equal(fs.readFileSync(legacyModePath, 'utf8'), originalModes, 'legacy setting imports leave original JSON unchanged');
 
     const malformed = configFor('malformed');
-    const goodSession = newSessionRecord(malformed, { id: 'good', notify: false });
+    const { autoReturn: _goodAutoReturn, ...goodSessionFields } = newSessionRecord(malformed, { id: 'good', autoReturn: false });
+    const goodSession = { ...goodSessionFields, notify: false };
     writeJson(path.join(stateDir(malformed), 'sessions', 'registry.json'), { sessions: { good: goodSession } });
     const badCallback = path.join(callbackQueuePath(malformed, 'parent'), 'bad.json');
     writeJson(badCallback, { type: 'session.return', id: 'bad' });
@@ -238,7 +314,7 @@ if (worker) {
     assert.equal(recordContextSend(context).sendCount, 1, 'unguarded legacy call retains semantics');
 
     const sessions = configFor('sessions');
-    for (const id of ['a', 'b', 'c', 'd', 'race']) putSession(sessions, newSessionRecord(sessions, { id, notify: false }));
+    for (const id of ['a', 'b', 'c', 'd', 'race']) putSession(sessions, newSessionRecord(sessions, { id, autoReturn: false }));
     await children('sessions', sessions, ['a', 'b', 'c', 'd']);
     for (const id of ['a', 'b', 'c', 'd']) assert.equal(getSession(sessions, id).lastResult, `${id}:39`);
     const stale = getSession(sessions, 'a');
@@ -249,13 +325,13 @@ if (worker) {
     putSession(sessions, stale);
     assert.equal(getSession(sessions, 'a').name, 'concurrent name');
     const staleRegistry = loadRegistry(sessions);
-    putSession(sessions, newSessionRecord(sessions, { id: 'new-record', notify: false }));
+    putSession(sessions, newSessionRecord(sessions, { id: 'new-record', autoReturn: false }));
     staleRegistry.sessions.b.name = 'patched via registry';
     saveRegistry(sessions, staleRegistry);
     assert.equal(getSession(sessions, 'new-record').id, 'new-record');
     assert.equal(getSession(sessions, 'b').name, 'patched via registry');
-    assert.throws(() => insertSession(sessions, newSessionRecord(sessions, { id: 'a', notify: true })), /session already exists/);
-    assert.equal(getSession(sessions, 'a').notify, false);
+    assert.throws(() => insertSession(sessions, newSessionRecord(sessions, { id: 'a', autoReturn: true })), /session already exists/);
+    assert.equal(getSession(sessions, 'a').autoReturn, false);
     const acquisition = await children('claim', sessions, ['1', '2', '3', '4']);
     assert.equal(acquisition.filter(result => result === 'claimed').length, 1);
     const owned = getSession(sessions, 'race');
@@ -326,7 +402,7 @@ if (worker) {
     const freshId = writeParentReturnNotification(callback, callbackParent, 'fresh');
     assert.equal(drainParentNotifications(callback)[0].id, freshId);
     assert.equal(listParentNotifications(callback).length, 0);
-    const completion = newSessionRecord(callback, { id: 'complete', notify: true, parentCallback: callbackParent });
+    const completion = newSessionRecord(callback, { id: 'complete', autoReturn: true, parentCallback: callbackParent });
     completion.status = 'completed';
     assert.ok(writeParentNotification(callback, completion));
     const completionNotice = claimParentNotifications(callback)[0];
@@ -334,27 +410,27 @@ if (worker) {
     assert.equal(noticeToInbound(completionNotice).source, 'session-callback');
     assert.equal(noticeToInbound(completionNotice).kind, 'wake');
     acknowledgeParentNotification(callback, completionNotice.id);
-    const atomic = insertSession(callback, newSessionRecord(callback, { id: 'atomic', notify: true, parentCallback: callbackParent, agentProfile: 'saved-profile', agentProfileSnapshot: { backend: 'mock' } }));
+    const atomic = insertSession(callback, newSessionRecord(callback, { id: 'atomic', autoReturn: true, parentCallback: callbackParent, agentProfile: 'saved-profile', agentProfileSnapshot: { backend: 'mock' } }));
     claimSessionRun(callback, atomic, 'atomic-run');
-    assert.equal(finishSessionRunAndNotify(callback, atomic.id, 'old-token', { status: 'completed' }), undefined);
+    assert.equal(finishSessionRunAndReturn(callback, atomic.id, 'old-token', { status: 'completed' }), undefined);
     assert.equal(listParentNotifications(callback).length, 0, 'stale token cannot enqueue completion');
-    const finishedAtomic = finishSessionRunAndNotify(callback, atomic.id, 'atomic-run', { status: 'completed', lastResult: 'atomic result' })!;
+    const finishedAtomic = finishSessionRunAndReturn(callback, atomic.id, 'atomic-run', { status: 'completed', lastResult: 'atomic result' })!;
     assert.equal(listParentNotifications(callback).length, 1);
     assert.equal(listParentNotifications(callback)[0].id, finishedAtomic.parentNotificationPath);
     assert.equal(finishedAtomic.agentProfile, 'saved-profile');
     assert.equal(finishedAtomic.agentProfileSnapshot?.backend, 'mock');
-    assert.equal(finishSessionRunAndNotify(callback, atomic.id, 'atomic-run', { status: 'failed' }), undefined);
+    assert.equal(finishSessionRunAndReturn(callback, atomic.id, 'atomic-run', { status: 'failed' }), undefined);
     assert.equal(listParentNotifications(callback).length, 1, 'double finalization cannot duplicate callback');
     drainParentNotifications(callback);
-    const rollbackRecord = insertSession(callback, newSessionRecord(callback, { id: 'rollback-notice', notify: true, parentCallback: callbackParent }));
+    const rollbackRecord = insertSession(callback, newSessionRecord(callback, { id: 'rollback-notice', autoReturn: true, parentCallback: callbackParent }));
     claimSessionRun(callback, rollbackRecord, 'rollback-run');
     getStateDb(callback).exec("CREATE TRIGGER reject_notice BEFORE INSERT ON parent_notifications BEGIN SELECT RAISE(ABORT, 'test reject notice'); END");
-    assert.throws(() => finishSessionRunAndNotify(callback, rollbackRecord.id, 'rollback-run', { status: 'completed' }), /test reject notice/);
+    assert.throws(() => finishSessionRunAndReturn(callback, rollbackRecord.id, 'rollback-run', { status: 'completed' }), /test reject notice/);
     assert.equal(getSession(callback, rollbackRecord.id).status, 'running', 'failed enqueue rolls back terminal session update');
     getStateDb(callback).exec('DROP TRIGGER reject_notice');
-    finishSessionRunAndNotify(callback, rollbackRecord.id, 'rollback-run', { status: 'failed', error: 'test failure' });
+    finishSessionRunAndReturn(callback, rollbackRecord.id, 'rollback-run', { status: 'failed', error: 'test failure' });
     drainParentNotifications(callback);
-    const lostOwner = insertSession(callback, newSessionRecord(callback, { id: 'lost-owner', notify: true, parentCallback: callbackParent }));
+    const lostOwner = insertSession(callback, newSessionRecord(callback, { id: 'lost-owner', autoReturn: true, parentCallback: callbackParent }));
     claimSessionRun(callback, lostOwner, 'lost-run');
     updateSessionRun(callback, lostOwner.id, 'lost-run', { pid: 99999999 });
     assert.equal(refreshSessionStatus(callback, getSession(callback, lostOwner.id)).status, 'failed');
@@ -454,7 +530,7 @@ async function testOrphanedGroup(config: AppConfig): Promise<void> {
       leader.once('message', () => { clearTimeout(timer); resolve(); });
     });
     const pid = leader.pid!;
-    const record = insertSession(config, newSessionRecord(config, { id: 'orphan-group', notify: false }));
+    const record = insertSession(config, newSessionRecord(config, { id: 'orphan-group', autoReturn: false }));
     claimSessionRun(config, record, 'group-run');
     updateSessionRun(config, record.id, 'group-run', { pid, watcherPid: undefined });
     const exited = new Promise<void>(resolve => leader.once('exit', () => resolve()));

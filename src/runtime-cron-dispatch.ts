@@ -89,7 +89,7 @@ export async function dispatchRuntimeCron(config: AppConfig, record: RuntimeCron
 
   if (record.target === 'new') {
     const id = `${record.id}-${makeSessionId()}`;
-    const session = insertSession(config, selectSessionAgent(config, newSessionRecord(config, { id, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt })));
+    const session = insertSession(config, selectSessionAgent(config, newSessionRecord(config, { id, name: `cron:${record.id}`, autoReturn: false, parentCallback: mainParentCallback(config), prompt: record.prompt })));
     await runSessionPrompt(config, session, record.prompt, false);
     return;
   }
@@ -105,11 +105,11 @@ function fixedSessionTarget(config: AppConfig, record: RuntimeCronRecord, sessio
     session = getSession(config, sessionId);
   } catch (error) {
     if (!(error instanceof Error) || error.message !== `session not found: ${sessionId}`) throw error;
-    session = selectSessionAgent(config, newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, notify: false, parentCallback: mainParentCallback(config), prompt: record.prompt }));
+    session = selectSessionAgent(config, newSessionRecord(config, { id: sessionId, name: `cron:${record.id}`, autoReturn: false, parentCallback: mainParentCallback(config), prompt: record.prompt }));
   }
-  session.notify = false;
+  session.autoReturn = false;
   session.parentCallback = mainParentCallback(config);
-  // Notify/callback changes are committed with the run claim, never by a stale pre-run overwrite.
+  // Return/callback changes are committed with the run claim, never by a stale pre-run overwrite.
   return session;
 }
 

@@ -54,7 +54,10 @@ function command(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
 function success(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
   const result = command(args, extraEnv);
   assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout);
+  const record = JSON.parse(result.stdout);
+  assert.equal(typeof record.autoReturn, 'boolean');
+  assert.equal(Object.hasOwn(record, 'notify'), false, 'CLI session records expose autoReturn only');
+  return record;
 }
 async function settled(id: string) {
   const deadline = Date.now() + 10_000;
@@ -67,15 +70,20 @@ async function settled(id: string) {
 }
 try {
   assert.ok(fs.existsSync(cli), 'build before running sessions tests');
-  for (const [wait, flag] of [[true, '--no-return'], [false, '--no-notify']] as const) {
+  const help = command(['--help']);
+  assert.equal(help.status, 2);
+  assert.match(help.stderr, /--return\|--no-return/);
+  assert.doesNotMatch(help.stderr, /notify/i, 'CLI usage advertises return flags only');
+  for (const wait of [true, false]) {
+    const flag = '--no-return';
     const id = `explicit-${wait}`;
     const parentEnv = { PI_SESSION_ID: 'main' };
     const created = success(['create', '--id', id, '--agent', 'returns', '--prompt', `create ${id}`, flag, ...(wait ? ['--wait'] : [])], parentEnv);
-    assert.equal(created.notify, false);
+    assert.equal(created.autoReturn, false);
     assert.equal(created.parentCallback.sessionId, 'main');
     assert.equal((await settled(id)).status, 'completed');
     const continued = success(['send', id, '--message', `continue ${id}`, flag, '--wait']);
-    assert.equal(continued.notify, false);
+    assert.equal(continued.autoReturn, false);
     assert.deepEqual(continued.parentCallback, created.parentCallback);
     const notices = listParentNotifications(config).filter(notice => notice.child?.id === id);
     assert.equal(notices.length, 2, 'create/send must enqueue only the explicit returns');
@@ -87,16 +95,31 @@ try {
     assert.equal(fallback.status, 0, fallback.stderr);
     assert.equal(listParentNotifications(config).filter(notice => notice.child?.id === id).length, 3);
   }
+  const noParentReturn = success(['create', '--id', 'no-parent-return', '--agent', 'fast', '--return', '--prompt', 'complete without caller', '--wait']);
+  assert.equal(noParentReturn.autoReturn, true, 'explicit --return is not silently disabled without a parent');
+  assert.equal(noParentReturn.status, 'completed');
+  assert.equal(noParentReturn.lastResult, 'saved-profile: complete without caller');
+  assert.equal(noParentReturn.parentCallback, undefined);
+  assert.equal(noParentReturn.parentNotificationPath, undefined);
+  assert.equal(noParentReturn.error, 'return failed: parent callback metadata missing');
+  assert.equal(listParentNotifications(config).filter(notice => notice.child?.id === noParentReturn.id).length, 0);
+  const noParentContinued = success(['send', noParentReturn.id, '--message', 'continue without caller', '--return', '--wait']);
+  assert.equal(noParentContinued.autoReturn, true);
+  assert.equal(noParentContinued.error, 'return failed: parent callback metadata missing');
+  assert.doesNotMatch(JSON.stringify(noParentContinued), /notify/i);
+  const noParentDisabled = success(['send', noParentReturn.id, '--message', 'disable automatic return', '--no-return', '--wait']);
+  assert.equal(noParentDisabled.autoReturn, false);
+  assert.equal(noParentDisabled.error, undefined);
   const repairedId = 'repair-missing-parent';
   success(['create', '--id', repairedId, '--agent', 'returns', '--no-return']);
   const repaired = success(['send', repairedId, '--message', 'repair callback', '--wait'], { PI_SESSION_ID: 'main' });
-  assert.equal(repaired.notify, false);
+  assert.equal(repaired.autoReturn, false);
   assert.equal(repaired.parentCallback.sessionId, 'main');
   const repairedNotices = listParentNotifications(config).filter(notice => notice.child?.id === repairedId);
   assert.equal(repairedNotices.length, 1);
   assert.equal(repairedNotices[0].type, 'session.return');
   const automatic = success(['send', repairedId, '--message', 'also complete', '--return', '--wait']);
-  assert.equal(automatic.notify, true);
+  assert.equal(automatic.autoReturn, true);
   assert.equal(automatic.parentCallback.sessionId, 'main');
   assert.deepEqual(listParentNotifications(config).filter(notice => notice.child?.id === repairedId).map(notice => notice.type), ['session.return', 'session.return', 'session.completed']);
 
@@ -104,7 +127,30 @@ try {
   assert.equal(named.agentProfile, 'fast');
   assert.equal(named.agentProfileSnapshot.backend, 'mock');
   assert.equal(named.lastResult, 'saved-profile: first');
-  assert.equal(named.notify, false);
+  assert.equal(named.autoReturn, false);
+  assert.equal(success(['status', 'named']).autoReturn, false);
+  const listed = command(['list']);
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /^named\tcompleted\tfalse\t/m);
+  assert.doesNotMatch(listed.stdout, /notify/i);
+  for (const flag of ['--notify', '--no-notify']) {
+    const id = `rejected-${flag.slice(2)}`;
+    const rejectedCreate = command(['create', '--id', id, flag, '--prompt', 'must not run', '--wait'], { PI_SESSION_ID: 'main' });
+    assert.equal(rejectedCreate.status, 2, rejectedCreate.stderr);
+    assert.doesNotMatch(rejectedCreate.stderr, /notify/i, 'invalid old flags must not be advertised');
+    assert.equal(rejectedCreate.stdout, '');
+    assert.equal(loadRegistry(config).sessions[id], undefined, 'invalid flags must not create sessions');
+    const beforeSend = getSession(config, 'named');
+    const rejectedSend = command(['send', 'named', flag, '--message', 'must not run', '--wait']);
+    assert.equal(rejectedSend.status, 2, rejectedSend.stderr);
+    assert.equal(rejectedSend.stdout, '');
+    assert.deepEqual(getSession(config, 'named'), beforeSend, 'invalid flags must not modify or execute existing sessions');
+    for (const args of [['status', 'named', flag], ['history', 'named', flag], ['list', flag]]) {
+      const rejectedRead = command(args);
+      assert.equal(rejectedRead.status, 2, rejectedRead.stderr);
+      assert.equal(rejectedRead.stdout, '');
+    }
+  }
   const duplicate = command(['create', '--id', 'named', '--agent', 'plain']);
   assert.notEqual(duplicate.status, 0);
   assert.match(duplicate.stderr, /already exists/);
@@ -149,7 +195,7 @@ try {
   const sync = success(['create', '--id', 'sync', '--agent', 'plain', '--prompt', 'sync text', '--wait']);
   assert.equal(sync.status, 'completed');
   assert.match(sync.lastResult, /sync text/);
-  const tokenSession = insertSession(config, selectSessionAgent(config, newSessionRecord(config, { id: 'token', notify: false }), 'fast'));
+  const tokenSession = insertSession(config, selectSessionAgent(config, newSessionRecord(config, { id: 'token', autoReturn: false }), 'fast'));
   const oldRun = claimSessionRun(config, tokenSession, 'old');
   assert.ok(oldRun);
   finishSessionRun(config, 'token', 'old', { status: 'completed', lastResult: 'old output' });
@@ -182,18 +228,18 @@ try {
   assert.equal(timedAsync.status, 'failed');
   assert.match(timedAsync.error!, /timed out/);
 
-  const dead = putSession(config, { ...newSessionRecord(config, { id: 'lost-pid', notify: false }), status: 'running', runId: 'lost', pid: 2147483647 });
+  const dead = putSession(config, { ...newSessionRecord(config, { id: 'lost-pid', autoReturn: false }), status: 'running', runId: 'lost', pid: 2147483647 });
   const lost = refreshSessionStatus(config, dead);
   assert.equal(lost.status, 'failed');
   assert.match(lost.error!, /interrupted|no successful result/);
-  const staleSend = putSession(config, { ...selectSessionAgent(config, newSessionRecord(config, { id: 'stale-send', notify: false }), 'fast'), status: 'running', runId: 'dead-run', pid: 2147483647, watcherPid: 2147483646 });
+  const staleSend = putSession(config, { ...selectSessionAgent(config, newSessionRecord(config, { id: 'stale-send', autoReturn: false }), 'fast'), status: 'running', runId: 'dead-run', pid: 2147483647, watcherPid: 2147483646 });
   const recoveredSend = await runSessionPrompt(config, staleSend, 'recovered without status first', true);
   assert.equal(recoveredSend.status, 'completed');
   assert.equal(recoveredSend.lastResult, 'saved-profile: recovered without status first');
-  const staleCronTarget = putSession(config, { ...selectSessionAgent(config, newSessionRecord(config, { id: 'stale-cron', notify: true }), 'fast'), status: 'running', runId: 'dead-cron-run', pid: 2147483647 });
+  const staleCronTarget = putSession(config, { ...selectSessionAgent(config, newSessionRecord(config, { id: 'stale-cron', autoReturn: true }), 'fast'), status: 'running', runId: 'dead-cron-run', pid: 2147483647 });
   await dispatchRuntimeCron(config, makeRuntimeCron({ id: 'recover-fixed', prompt: 'cron recovered', schedule: { type: 'cron', expression: '* * * * *' }, target: 'session:stale-cron' }), async () => {});
   assert.equal(getSession(config, staleCronTarget.id).lastResult, 'saved-profile: cron recovered');
-  assert.equal(getSession(config, staleCronTarget.id).notify, false);
+  assert.equal(getSession(config, staleCronTarget.id).autoReturn, false);
 
   for (const wait of [true, false]) {
     const id = `unicode-${wait}`;

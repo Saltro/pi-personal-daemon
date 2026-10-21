@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { resolveAgentProfile, sessionAgentProcess, sessionAgentProfile, type AgentProcess } from './agents/index.js';
 import { absoluteConfigPath, agentProcessEnv, sessionWatcherCommand } from './process-paths.js';
 import { agentProcessDetached, agentProcessGroupAlive, signalAgentProcess, waitForAgentProcessExit } from './process-control.js';
-import { appendSessionLog, claimSessionRun, finishSessionRunAndNotify, getSession, refreshSessionStatus, updateSessionRun, type PersonalSessionRecord } from './session-registry.js';
+import { appendSessionLog, claimSessionRun, finishSessionRunAndReturn, getSession, refreshSessionStatus, updateSessionRun, type PersonalSessionRecord } from './session-registry.js';
 import type { AppConfig } from './types.js';
 
 const STARTUP_TIMEOUT_MS = 10_000;
@@ -41,11 +41,11 @@ export function selectSessionAgent(config: AppConfig, record: PersonalSessionRec
 export async function runSessionPrompt(config: AppConfig, session: PersonalSessionRecord | string, prompt: string, wait: boolean): Promise<PersonalSessionRecord> {
   let original = typeof session === 'string' ? getSession(config, session) : session;
   if (original.status === 'running') {
-    const { notify, parentCallback } = original;
+    const { autoReturn, parentCallback } = original;
     // A dead leader is not an empty process group: don't reclaim while its tools still run.
     const harnessGroupAlive = original.pid && agentProcessDetached && agentProcessGroupAlive({ pid: original.pid });
     if (!harnessGroupAlive) original = refreshSessionStatus(config, original);
-    Object.assign(original, { notify, parentCallback });
+    Object.assign(original, { autoReturn, parentCallback });
   }
   const selected = sessionAgentProfile(config, original);
   const runId = randomUUID();
@@ -86,7 +86,7 @@ export function finishSessionRun(config: AppConfig, id: string, runId: string, p
   const current = getSession(config, id);
   if (current.runId !== runId || current.status !== 'running') return current;
   appendSessionLog(current, `\n## ${new Date().toISOString()} run finished runId=${runId} status=${patch.status} exitCode=${patch.exitCode ?? 'unknown'}${patch.error ? ` error=${patch.error}` : ''}\n`);
-  return finishSessionRunAndNotify(config, id, runId, { ...patch, pid: undefined, watcherPid: undefined }) || getSession(config, id);
+  return finishSessionRunAndReturn(config, id, runId, { ...patch, pid: undefined, watcherPid: undefined }) || getSession(config, id);
 }
 
 async function launchSessionWatcher(config: AppConfig, record: PersonalSessionRecord, runId: string, prompt: string): Promise<PersonalSessionRecord> {

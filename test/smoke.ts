@@ -143,10 +143,10 @@ assert.match(sent.card.body.elements[2].content, /<font color="grey"><font size=
 assert.equal(readCurrentContext(config).sendCount, 1);
 
 const noParent = JSON.parse(cli(['sessions', 'create', '--id', 'no-parent']).stdout);
-assert.equal(noParent.notify, false);
+assert.equal(noParent.autoReturn, false);
 const created = JSON.parse(cli(['sessions', 'create', '--id', 's1', '--name', 'smoke session', '--prompt', 'first prompt', '--wait'], configPath, { PI_SESSION_ID: 'smoke-parent' }).stdout);
 assert.equal(created.status, 'completed');
-assert.equal(created.notify, true);
+assert.equal(created.autoReturn, true);
 assert.ok(created.parentCallback);
 assert.ok(created.parentNotificationPath);
 assert.match(created.lastResult, /first prompt/);
@@ -231,7 +231,7 @@ const targetSessions = loadRegistry(targetConfig).sessions;
 assert.equal(Object.values(targetSessions).filter(session => session.lastPrompt === 'new target prompt').length, 1);
 assert.equal(targetSessions['target-s1'].lastPrompt, 'session target prompt');
 assert.equal(targetSessions['fixed-child'].lastPrompt, 'fixed child prompt b');
-for (const session of Object.values(targetSessions)) assert.equal(session.notify, false);
+for (const session of Object.values(targetSessions)) assert.equal(session.autoReturn, false);
 assert.ok(targetSessions['fixed-child'].parentCallback);
 const fixedLog = fs.readFileSync(targetSessions['fixed-child'].logPath, 'utf8');
 assert.match(fixedLog, /fixed child prompt a/);

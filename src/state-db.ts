@@ -6,7 +6,7 @@ import { legacyContextPath, stateDbPath, stateDir } from './state-paths.js';
 import type { AppConfig } from './types.js';
 import type { RuntimeCronRecord } from './cron-registry.js';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const connections = new Map<string, DatabaseSync>();
 type FieldKind = 'text' | 'number' | 'boolean' | 'json';
 export type StateFields = Record<string, FieldKind>;
@@ -29,7 +29,7 @@ export function changedStateFields(record: object): Record<string, unknown> {
 }
 export const sessionFields: StateFields = {
   id: 'text', sessionId: 'text', cwd: 'text', sessionDir: 'text', name: 'text', status: 'text',
-  pid: 'number', watcherPid: 'number', runId: 'text', agentProfile: 'text', agentProfileSnapshot: 'json', notify: 'boolean',
+  pid: 'number', watcherPid: 'number', runId: 'text', agentProfile: 'text', agentProfileSnapshot: 'json', autoReturn: 'boolean',
   parentCallback: 'json', parentNotificationPath: 'text', createdAt: 'text', updatedAt: 'text',
   lastPrompt: 'text', lastResult: 'text', logPath: 'text', exitCode: 'number', error: 'text',
 };
@@ -94,6 +94,9 @@ export function getStateDb(config: AppConfig): DatabaseSync {
       }
       if (version < 2) {
         db.exec('ALTER TABLE crons ADD COLUMN runId TEXT; PRAGMA user_version = 2;');
+      }
+      if (version < 3) {
+        db.exec('ALTER TABLE sessions RENAME COLUMN notify TO autoReturn; PRAGMA user_version = 3;');
       }
       if (!db.prepare('SELECT value FROM state_meta WHERE key = ?').get('legacy-json-v1')) {
         importLegacyState(db, config);
@@ -198,8 +201,11 @@ function importLegacyState(db: DatabaseSync, config: AppConfig): void {
       optionalInteger(record.exitCode, 'exitCode');
       if (record.parentCallback !== undefined) validateParent(requireObject(record.parentCallback, 'parentCallback'));
       if (record.agentProfileSnapshot !== undefined) requireObject(record.agentProfileSnapshot, 'agentProfileSnapshot');
+      // The old notify property is accepted only when importing retained JSON state.
       if (record.notify !== undefined && typeof record.notify !== 'boolean' && !['parent', 'none', 'feishu'].includes(String(record.notify))) throw new Error(`invalid legacy notify for session ${id}`);
-      insertStateRow(db, 'sessions', sessionFields, { ...record, notify: record.notify === true || record.notify === 'parent' });
+      if (record.autoReturn !== undefined && typeof record.autoReturn !== 'boolean') throw new Error(`invalid legacy autoReturn for session ${id}`);
+      const autoReturn = record.autoReturn ?? (record.notify === true || record.notify === 'parent');
+      insertStateRow(db, 'sessions', sessionFields, { ...record, autoReturn });
     }
   });
   importFile(path.join(root, 'cron', 'registry.json'), raw => {

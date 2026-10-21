@@ -43,7 +43,7 @@ try {
   await assert.rejects(namedMain.steer('unsupported'), /does not support steer/);
   namedMain.close();
 
-  const record = selectSessionAgent(config, newSessionRecord(config, { id: 'snapshot', notify: false }), 'pi');
+  const record = selectSessionAgent(config, newSessionRecord(config, { id: 'snapshot', autoReturn: false }), 'pi');
   config.agentProfiles!.pi = { backend: 'mock', replyPrefix: 'changed' };
   config.agent.piBin = '/changed/global';
   const spec = sessionAgentProcess(config, record, 'prompt');
@@ -123,7 +123,7 @@ try {
   assert.equal(await unicodeRunner.promptAndWait('unicode'), '你好🙂');
   unicodeRunner.close();
 
-  const legacyRecord = { ...newSessionRecord(config, { id: 'legacy', notify: false }), cwd: path.join(tmp, 'old-cwd'), sessionDir: path.join(tmp, 'old-sessions') };
+  const legacyRecord = { ...newSessionRecord(config, { id: 'legacy', autoReturn: false }), cwd: path.join(tmp, 'old-cwd'), sessionDir: path.join(tmp, 'old-sessions') };
   const legacyConfig = { ...config, agent: { ...config.agent, profile: 'new-main', mock: false, piBin: '/legacy/pi', extraArgs: ['--legacy'] }, agentProfiles: { default: { backend: 'process', command: '/wrong-default' } as ProcessAgentProfile, 'new-main': { backend: 'process', command: '/wrong-main' } as ProcessAgentProfile } };
   const legacySpec = sessionAgentProcess(legacyConfig, legacyRecord, 'old history');
   if (typeof legacySpec === 'string') throw new Error('legacy Pi record incorrectly selected mock');
@@ -141,7 +141,7 @@ try {
 
   const argumentProfile: ProcessAgentProfile = { backend: 'process', command: process.execPath, promptMode: 'argument', args: ['--task={prompt}', '--id={sessionId}'] };
   const argumentConfig = { ...config, agentProfiles: { arg: argumentProfile } };
-  const argument = sessionAgentProcess(argumentConfig, selectSessionAgent(argumentConfig, newSessionRecord(config, { id: 'arg-session', notify: false }), 'arg'), 'a\n" b');
+  const argument = sessionAgentProcess(argumentConfig, selectSessionAgent(argumentConfig, newSessionRecord(config, { id: 'arg-session', autoReturn: false }), 'arg'), 'a\n" b');
   if (typeof argument === 'string') throw new Error('unexpected mock');
   assert.deepEqual(argument.args, ['--task=a\n" b', '--id=arg-session']);
   assert.equal(argument.stdin, undefined);

@@ -34,7 +34,7 @@ export interface PersonalSessionRecord {
   runId?: string;
   agentProfile?: string;
   agentProfileSnapshot?: AgentProfile;
-  notify: boolean;
+  autoReturn: boolean;
   parentCallback?: ParentCallback;
   parentNotificationPath?: string;
   createdAt: string;
@@ -154,24 +154,24 @@ function updateSessionRunInTransaction(config: AppConfig, id: string, runId: str
 
 export const finishSessionRun = updateSessionRun;
 
-export function finishSessionRunAndNotify(config: AppConfig, id: string, runId: string, patch: Partial<PersonalSessionRecord>): PersonalSessionRecord | undefined {
-  if (patch.status !== 'completed' && patch.status !== 'failed') throw new Error('finishSessionRunAndNotify requires completed or failed status');
+export function finishSessionRunAndReturn(config: AppConfig, id: string, runId: string, patch: Partial<PersonalSessionRecord>): PersonalSessionRecord | undefined {
+  if (patch.status !== 'completed' && patch.status !== 'failed') throw new Error('finishSessionRunAndReturn requires completed or failed status');
   const db = getStateDb(config);
   return stateTransaction(db, () => {
     const record = updateSessionRunInTransaction(config, id, runId, patch);
-    return record ? notifyFinishedSessionInTransaction(config, record) : undefined;
+    return record ? returnFinishedSessionInTransaction(config, record) : undefined;
   });
 }
 
-function notifyFinishedSessionInTransaction(config: AppConfig, record: PersonalSessionRecord): PersonalSessionRecord {
-  if (!record.notify) return record;
+function returnFinishedSessionInTransaction(config: AppConfig, record: PersonalSessionRecord): PersonalSessionRecord {
+  if (!record.autoReturn) return record;
   const db = getStateDb(config);
   const notice = makeParentNotification(record);
   if (notice) {
     const noticeId = persistParentNotification(config, notice);
     patchStateRow(db, 'sessions', sessionFields, record.id, { parentNotificationPath: noticeId });
   } else {
-    patchStateRow(db, 'sessions', sessionFields, record.id, { error: [record.error, 'notify failed: parent callback metadata missing'].filter(Boolean).join('; ') });
+    patchStateRow(db, 'sessions', sessionFields, record.id, { error: [record.error, 'return failed: parent callback metadata missing'].filter(Boolean).join('; ') });
   }
   return getSession(config, record.id);
 }
@@ -180,7 +180,7 @@ export function newSessionRecord(config: AppConfig, fields: {
   id: string;
   cwd?: string;
   name?: string;
-  notify: boolean;
+  autoReturn: boolean;
   parentCallback?: ParentCallback;
   prompt?: string;
   agentProfile?: string;
@@ -196,7 +196,7 @@ export function newSessionRecord(config: AppConfig, fields: {
     status: 'idle',
     agentProfile: fields.agentProfile,
     agentProfileSnapshot: fields.agentProfileSnapshot,
-    notify: fields.notify,
+    autoReturn: fields.autoReturn,
     parentCallback: fields.parentCallback,
     createdAt: now,
     updatedAt: now,
@@ -233,7 +233,7 @@ export function refreshSessionStatus(config: AppConfig, record: PersonalSessionR
       .get(record.id, 'running', record.pid ?? null, record.watcherPid ?? null, record.runId ?? null);
     if (!current) return undefined;
     patchStateRow(db, 'sessions', sessionFields, record.id, { ...patch, updatedAt: new Date().toISOString() });
-    return notifyFinishedSessionInTransaction(config, getSession(config, record.id));
+    return returnFinishedSessionInTransaction(config, getSession(config, record.id));
   });
   if (updated) appendSessionLog(updated, `\n## ${new Date().toISOString()} registry marked interrupted stale running pid=${pid ?? 'missing'}\n`);
   return updated || getSession(config, record.id);

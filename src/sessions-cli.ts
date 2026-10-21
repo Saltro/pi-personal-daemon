@@ -19,7 +19,7 @@ interface ParsedOptions {
   cwd?: string;
   name?: string;
   agent?: string;
-  notify?: boolean;
+  autoReturn?: boolean;
   prompt?: string;
   message?: string;
   stdin?: boolean;
@@ -29,8 +29,8 @@ interface ParsedOptions {
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal sessions create [--id <id>] [--cwd <cwd>] [--name <name>] [--agent <profile>] [--return|--no-return] [--notify|--no-notify] [--prompt <text>] [--stdin] [--wait]
-  pi-personal sessions send <id> [--message <text>] [--stdin] [--wait] [--return|--no-return] [--notify|--no-notify]
+  pi-personal sessions create [--id <id>] [--cwd <cwd>] [--name <name>] [--agent <profile>] [--return|--no-return] [--prompt <text>] [--stdin] [--wait]
+  pi-personal sessions send <id> [--message <text>] [--stdin] [--wait] [--return|--no-return]
   pi-personal sessions list
   pi-personal sessions status <id>
   pi-personal sessions history <id> [--lines <n>]`);
@@ -43,8 +43,8 @@ function parseOptions(args: string[]): ParsedOptions {
     const arg = args[i];
     if (arg === '--stdin') out.stdin = true;
     else if (arg === '--wait') out.wait = true;
-    else if (arg === '--notify' || arg === '--return') out.notify = true;
-    else if (arg === '--no-notify' || arg === '--no-return') out.notify = false;
+    else if (arg === '--return') out.autoReturn = true;
+    else if (arg === '--no-return') out.autoReturn = false;
     else if (arg === '--id') out.id = needValue(args, ++i, arg);
     else if (arg === '--cwd') out.cwd = needValue(args, ++i, arg);
     else if (arg === '--name') out.name = needValue(args, ++i, arg);
@@ -82,7 +82,10 @@ export async function runSessionsCli(args: string[]): Promise<void> {
   const config = loadConfig();
   if (command === 'create') await createSession(config, parseOptions(rest));
   else if (command === 'send') await sendSession(config, parseOptions(rest));
-  else if (command === 'list') listSessions(config);
+  else if (command === 'list') {
+    if (rest.length) usage();
+    listSessions(config);
+  }
   else if (command === 'status') statusSession(config, parseOptions(rest));
   else if (command === 'history') historySession(config, parseOptions(rest));
   else usage();
@@ -91,13 +94,13 @@ export async function runSessionsCli(args: string[]): Promise<void> {
 async function createSession(config: AppConfig, opts: ParsedOptions): Promise<void> {
   const id = opts.id || makeSessionId();
   const parentCallback = detectParentCallback(config);
-  const notify = opts.notify ?? Boolean(parentCallback);
+  const autoReturn = opts.autoReturn ?? Boolean(parentCallback);
   const prompt = await promptFromOptions(opts, 'prompt');
   let record = newSessionRecord(config, {
     id,
     cwd: opts.cwd,
     name: opts.name,
-    notify,
+    autoReturn,
     parentCallback,
     prompt,
   });
@@ -114,7 +117,7 @@ async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void
   const prompt = await promptFromOptions(opts, 'message');
   if (!prompt) throw new Error('sessions send requires --message or --stdin');
   let record = getSession(config, id);
-  if (opts.notify !== undefined) record.notify = opts.notify;
+  if (opts.autoReturn !== undefined) record.autoReturn = opts.autoReturn;
   record.parentCallback = detectParentCallback(config) ?? record.parentCallback;
   record = await runSessionPrompt(config, record, prompt, Boolean(opts.wait));
   console.log(JSON.stringify(record, null, 2));
@@ -123,7 +126,7 @@ async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void
 function listSessions(config: AppConfig): void {
   const sessions = Object.values(loadRegistry(config).sessions).map(record => refreshSessionStatus(config, record)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const record of sessions) {
-    console.log(`${record.id}\t${record.status}\t${record.notify}\t${record.updatedAt}\t${record.name || ''}`);
+    console.log(`${record.id}\t${record.status}\t${record.autoReturn}\t${record.updatedAt}\t${record.name || ''}`);
   }
 }
 

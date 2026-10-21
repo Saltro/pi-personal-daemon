@@ -130,7 +130,7 @@ It needs parent metadata supplied by a session/cron launch or the surrounding Pi
 pi-personal sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
 pi-personal sessions send research-1 --message 'continue with Y' --wait
 pi-personal sessions create --agent other-harness --prompt 'run asynchronously' --no-return
-pi-personal sessions create --prompt 'run and notify main' --return
+pi-personal sessions create --prompt 'run and return the result to main' --return
 pi-personal sessions list
 pi-personal sessions status research-1
 pi-personal sessions history research-1 --lines 80
@@ -142,8 +142,8 @@ pi-personal sessions history research-1 --lines 80
 - PID loss is failure/interruption, never proof of successful completion. A still-live worker, supervisor, or owned process group prevents accidental restart overlap. Unix timeout/cancellation terminates the owned group and confirms exit before releasing the run; pipe decoding preserves UTF-8 across chunks.
 - Duplicate explicit session IDs are rejected, not overwritten.
 - CLI `history` shows the daemon execution log; native backend history stays with the backend.
-- `--return` requests a completion notice; `--notify` remains an alias. `--no-return` / `--no-notify` suppress completion notices, not explicit `return` calls. Creating or sending from a parent agent records return metadata independently of that flag; sends without parent context retain the saved metadata. Previously affected sessions missing metadata regain it on their next send from the parent.
-- Without a flag, completion notification defaults on only if `PI_SESSION_ID` or `PI_SESSION_FILE` is present. Outside Pi it defaults off.
+- `--return` enables automatic return to main when a run finishes; `--no-return` disables it. The session record stores this choice as `autoReturn`. Explicit `pi-personal return` calls work independently of that switch. Creating or sending from a parent agent records return metadata regardless of the flag; sends without parent context retain the saved metadata. Previously affected sessions missing metadata regain it on their next send from the parent.
+- Without a flag, automatic return defaults on only if `PI_SESSION_ID` or `PI_SESSION_FILE` is present. Outside Pi it defaults off.
 
 Completion state and its requested callback are committed together in SQLite. Callback records are claimed one at a time when main actually begins delivery and acknowledged after agent processing; a waiting backlog does not consume retry attempts. A failed delivery is retried with a short backoff, up to three attempts. Interrupted claims recover on daemon startup; exhausted records remain failed for inspection. This provides bounded retry, **not exactly-once external side effects**. A crash after an agent acts but before acknowledgment can cause duplicate processing.
 
@@ -161,7 +161,7 @@ First database access imports existing daemon JSON state transactionally and onc
 - the configured legacy current context file
 - existing `session-callbacks` notices
 
-Before deploying this migration, stop the old daemon and all old state-writing CLI/watchers. Keep the same state directory and verify the new records with CLI status/list commands. Malformed legacy state fails import with an error rather than being silently discarded. Source JSON files are retained; new code does not dual-write them. Do not keep old and new writers running together.
+Before deploying this migration, stop the old daemon and all old state-writing CLI/watchers. Keep the same state directory and verify the new records with CLI status/list commands. Malformed legacy state fails import with an error rather than being silently discarded. Source JSON files are retained; new code does not dual-write them. Do not keep old and new writers running together. Schema version 3 renames the automatic-return field while preserving existing session settings; old JSON fields are accepted only during import, not as CLI aliases.
 
 Logs, mock outbox, config, and Pi-native history/memory/skills remain files. Runtime SQL transactions never wait on model execution, spawn, RPC, or network calls. No real cache migration is performed by the test suite.
 
