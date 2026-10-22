@@ -7,6 +7,7 @@ import { runDaemonCli } from './cli/daemon.js';
 import { runReturnCli } from './cli/return.js';
 import { runSendCli } from './cli/send.js';
 import { runSessionsCli } from './cli/sessions.js';
+import { runUpdateCli, runVersionCli } from './cli/update.js';
 import { PersonalDaemon } from './core/daemon/daemon.js';
 import { daemonStatus, removeDaemonPid, writeDaemonPid } from './core/daemon/lifecycle.js';
 
@@ -18,14 +19,18 @@ function usage(exitCode: number): never {
   retriever return <text...> | --stdin
   retriever bind <destination|feishu-chat|status> ...
   retriever sessions <create|send|list|status|history> ...
-  retriever cron <create|list|status|update|disable|delete> ...`);
+  retriever cron <create|list|status|update|disable|delete> ...
+  retriever update [--latest]
+  retriever version`);
   process.exit(exitCode);
 }
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (command === '--help' || command === '-h') usage(0);
-  if (command === 'send') await runSendCli(args);
+  if (command === 'version' || command === '-v' || command === '--version') runVersionCli();
+  else if (command === 'update') await runUpdateCli(args);
+  else if (command === 'send') await runSendCli(args);
   else if (command === 'return') await runReturnCli(args);
   else if (command === 'bind') await runBindCli(args);
   else if (command === 'sessions') await runSessionsCli(args);

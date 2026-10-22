@@ -15,6 +15,16 @@ retr daemon status
 
 Retriever runs on Node **22.13+** in a Unix-like environment (macOS/Linux with `ps`). SQLite uses Node's built-in `node:sqlite`; some supported Node versions emit an experimental warning.
 
+## Upgrade
+
+```bash
+retriever update          # latest version compatible with the installed version (^x.y.z)
+retriever update --latest # latest published version, including newer minor/major lines
+retriever version         # installed version; -v and --version also work
+```
+
+`update` reinstalls through the same global package manager (npm or pnpm) that owns the running install; a checkout running from source has nothing to update. Restart the daemon afterwards to run the new code.
+
 ## Develop and test
 
 Developing from a clone requires pnpm **10.34.4** and the same Node/Unix environment above.
@@ -51,7 +61,7 @@ retriever daemon stop
 
 The pid file and background log live in `runtime.stateDir` (`daemon.pid`, `daemon.log`), so each state directory is managed independently. `start` refuses to run when a live pid already exists; `status` prints JSON and exits 1 when the daemon is not running. A pid file whose process is gone is reported as `stalePid` and removed by the next `status`, `restart`, or `stop`. Stopping sends `SIGTERM` and waits up to ten seconds for exit; it reports the log path instead of escalating to `SIGKILL`.
 
-Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes executable `dist/retriever` and `dist/retr` helpers. Running `retriever` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, and `cron` run their subcommands and exit. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
+Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes executable `dist/retriever` and `dist/retr` helpers. Running `retriever` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, `cron`, and `update` run their subcommands and exit, and `version` prints the installed version. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
 
 ## Configuration
 

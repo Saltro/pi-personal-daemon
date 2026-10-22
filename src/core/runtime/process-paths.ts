@@ -15,6 +15,20 @@ function findPackageRoot(start: string): string {
   }
 }
 
+/**
+ * Locate the package actually being executed. The bundler freezes `import.meta.url` at build
+ * time, so derive the root from the real entry path (src/index.ts or dist/index.js).
+ */
+export function selfPackageRoot(): string {
+  if (process.argv[1]) {
+    try {
+      const entryDirectory = path.dirname(fs.realpathSync(process.argv[1]));
+      return findPackageRoot(entryDirectory);
+    } catch { /* Programmatic callers keep the build-time root. */ }
+  }
+  return packageRoot;
+}
+
 /** Resolve a built sibling from the installed entry point, including npm's bin symlink. */
 export function helperBinDirectory(): string {
   if (process.argv[1]) {

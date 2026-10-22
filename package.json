@@ -43,7 +43,7 @@
     "dev": "tsx src/index.ts",
     "smoke": "tsx test/smoke.ts",
     "test": "pnpm run typecheck && pnpm run build && pnpm run test:unit && pnpm run smoke",
-    "test:unit": "tsx test/storage.ts && tsx test/runner.ts && tsx test/scheduler.ts && tsx test/agents.ts && tsx test/sessions.ts && tsx test/channels.ts && tsx test/lifecycle.ts"
+    "test:unit": "tsx test/storage.ts && tsx test/runner.ts && tsx test/scheduler.ts && tsx test/agents.ts && tsx test/sessions.ts && tsx test/channels.ts && tsx test/lifecycle.ts && tsx test/update.ts"
   },
   "engines": {
     "node": ">=22.13.0"
