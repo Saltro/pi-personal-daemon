@@ -80,7 +80,7 @@ Default configuration (Feishu channel, Pi agent):
 }
 ```
 
-`workspaceDir` is the working directory for the main agent and for child sessions without their own `cwd`. `stateDir` overrides the state directory, which defaults to `$XDG_STATE_HOME/retriever`, or `~/.local/state/retriever`.
+`workspaceDir` is the working directory for the main agent and for child sessions without their own `cwd`; it defaults to `$XDG_DATA_HOME/retriever` (`~/.local/share/retriever`). `stateDir` defaults to `$XDG_STATE_HOME/retriever` (`~/.local/state/retriever`). Relative `XDG_*` values are ignored, per the XDG spec.
 
 Common overrides: `RETRIEVER_WORKSPACE_DIR`, `RETRIEVER_CHANNEL`, `PI_BIN`, `RETRIEVER_PI_SESSION_DIR`, `RETRIEVER_PI_EXTRA_ARGS`, `RETRIEVER_PI_TIMEOUT_MS`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `RETRIEVER_STATE_DIR`. Extra args are space-separated in the environment variable; use JSON arrays in config for arguments containing spaces.
 

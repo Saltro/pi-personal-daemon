@@ -6,18 +6,30 @@ import type { AppConfig } from './types.js';
 /** The single main session identity; not user-configurable. */
 export const MAIN_SESSION_ID = 'personal-agent';
 
-const DEFAULT_CONFIG: AppConfig = {
-  workspaceDir: process.cwd(),
-  channel: { type: 'feishu' },
-  extensions: {
-    pi: { bin: 'pi', extraArgs: [] },
-    feishu: { appId: '', appSecret: '' },
-  },
-};
+function defaultConfig(): AppConfig {
+  return {
+    workspaceDir: defaultWorkspaceDir(),
+    channel: { type: 'feishu' },
+    extensions: {
+      pi: { bin: 'pi', extraArgs: [] },
+      feishu: { appId: '', appSecret: '' },
+    },
+  };
+}
+
+/** XDG variables must be absolute; ignore relative values as the spec requires. */
+export function xdgDir(variable: string, fallback: string[]): string {
+  const value = process.env[variable];
+  if (value && path.isAbsolute(value)) return value;
+  return path.join(os.homedir(), ...fallback);
+}
 
 export function defaultConfigPath(): string {
-  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(base, 'retriever', 'config.json');
+  return path.join(xdgDir('XDG_CONFIG_HOME', ['.config']), 'retriever', 'config.json');
+}
+
+export function defaultWorkspaceDir(): string {
+  return path.join(xdgDir('XDG_DATA_HOME', ['.local', 'share']), 'retriever');
 }
 
 export function resolveConfigPath(): string {
@@ -69,12 +81,13 @@ export function loadConfig(): AppConfig {
   };
 
   const config = mergeConfig(
-    mergeConfig(DEFAULT_CONFIG, fileConfig),
+    mergeConfig(defaultConfig(), fileConfig),
     stripUndefined(envConfig) as Partial<AppConfig>,
   );
   const baseDir = path.dirname(configPath);
   config.configPath = configPath;
   config.workspaceDir = path.resolve(baseDir, config.workspaceDir);
+  fs.mkdirSync(config.workspaceDir, { recursive: true });
   if (config.stateDir) config.stateDir = path.resolve(baseDir, config.stateDir);
   const pi = config.extensions.pi;
   if (pi.sessionDir) pi.sessionDir = path.resolve(baseDir, pi.sessionDir);

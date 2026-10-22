@@ -1,10 +1,9 @@
-import os from 'node:os';
 import path from 'node:path';
+import { xdgDir } from '../../config.js';
 import type { AppConfig } from '../../types.js';
 
 export function defaultStateDir(): string {
-  const base = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
-  return path.join(base, 'retriever');
+  return path.join(xdgDir('XDG_STATE_HOME', ['.local', 'state']), 'retriever');
 }
 
 export function stateDir(config: AppConfig): string {
