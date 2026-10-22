@@ -240,12 +240,17 @@ const continued = JSON.parse(
 );
 assert.equal(continued.status, 'completed');
 assert.match(continued.lastResult, /second prompt/);
-assert.match(cli(['sessions', 'list']).stdout, /^s1\tcompleted\ttrue/m);
+assert.match(cli(['sessions', 'list']).stdout, /^ID\s+STATUS\s+RETURN\s+UPDATED\s+NAME$/m);
+assert.match(cli(['sessions', 'list']).stdout, /^s1\s+completed\s+true/m);
 assert.equal(JSON.parse(cli(['sessions', 'status', 's1']).stdout).id, 's1');
 assert.match(
   cli(['sessions', 'history', 's1', '--lines', '20']).stdout,
   /first prompt[\s\S]*second prompt/,
 );
+const mainSessionStatus = JSON.parse(cli(['main-session', 'status']).stdout);
+assert.equal(mainSessionStatus.sessionId, 'personal-agent');
+assert.equal(mainSessionStatus.backend, 'mock');
+assert.equal(JSON.parse(cli(['main-session']).stdout).sessionId, 'personal-agent');
 
 const fakePi = path.join(tmp, 'fake-pi.cjs');
 fs.writeFileSync(
@@ -293,7 +298,8 @@ cli([
   'main',
 ]);
 assert.equal(loadCronRegistry(config).crons.c1.prompt, 'cron prompt');
-assert.match(cli(['cron', 'list']).stdout, /^c1\tscheduled\ttrue\tmain/m);
+assert.match(cli(['cron', 'list']).stdout, /^ID\s+STATUS\s+ENABLED\s+TARGET\s+NEXT RUN$/m);
+assert.match(cli(['cron', 'list']).stdout, /^c1\s+scheduled\s+true\s+main/m);
 const updatedCron = JSON.parse(
   cli([
     'cron',
@@ -469,6 +475,11 @@ assert.equal(listParentNotifications(targetConfig).length, 0);
 assert.ok(explicitReturnEvents.some((message) => message.includes('explicit cron child return')));
 assert.ok(explicitReturnEvents.some((message) => message.includes('fixed-child')));
 returnDaemon.stop();
+cli(['main-session', 'use', 'target-s1'], targetPath);
+const selectedMain = JSON.parse(cli(['main-session'], targetPath).stdout);
+assert.equal(selectedMain.id, 'target-s1');
+assert.equal(selectedMain.sessionId, 'target-s1');
+assert.match(cli(['sessions', 'list'], targetPath).stdout, /^target-s1\s+/m);
 daemon.stop();
 steerDaemon.stop();
 console.log('smoke ok', outbox);

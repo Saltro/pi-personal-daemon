@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import { loadConfig } from '../config.js';
 import { detectParentCallback } from '../core/sessions/callbacks.js';
+import { mainSessionRecord } from '../core/sessions/main.js';
 import { runSessionPrompt, selectSessionAgent } from '../core/sessions/service.js';
+import { formatTable } from './table.js';
 
 export { runSessionPrompt } from '../core/sessions/service.js';
 
@@ -132,14 +134,22 @@ async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void
 }
 
 function listSessions(config: AppConfig): void {
+  mainSessionRecord(config);
   const sessions = Object.values(loadRegistry(config).sessions)
     .map((record) => refreshSessionStatus(config, record))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const record of sessions) {
-    console.log(
-      `${record.id}\t${record.status}\t${record.autoReturn}\t${record.updatedAt}\t${record.name || ''}`,
-    );
-  }
+  console.log(
+    formatTable(
+      ['ID', 'STATUS', 'RETURN', 'UPDATED', 'NAME'],
+      sessions.map((record) => [
+        record.id,
+        record.status,
+        String(record.autoReturn),
+        record.updatedAt,
+        record.name || '',
+      ]),
+    ),
+  );
 }
 
 function statusSession(config: AppConfig, opts: ParsedOptions): void {

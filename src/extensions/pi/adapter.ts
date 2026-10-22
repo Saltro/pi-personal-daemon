@@ -4,11 +4,13 @@ import { PiRpcRunner } from './runner.js';
 
 export const piAdapter: AgentAdapter = {
   sessionCapabilities: { prompt: true, steer: false, history: false, contextUsage: false },
-  createMainRunner(config, profile) {
+  createMainRunner(config, profile, record) {
     if (profile.backend !== 'pi') throw new Error('invalid Pi agent profile');
     const runner = new PiRpcRunner(config, {
-      cwd: profile.cwd,
-      sessionDir: profile.sessionDir,
+      cwd: record?.cwd ?? profile.cwd,
+      sessionDir: record?.sessionDir ?? profile.sessionDir,
+      sessionId: record?.sessionId,
+      record,
       bin: profile.bin || config.extensions.pi.bin,
       extraArgs: profile.extraArgs || [],
       commandTimeoutMs: profile.timeoutMs,

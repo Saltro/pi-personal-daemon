@@ -1,7 +1,7 @@
-import { MAIN_SESSION_ID } from '../../config.js';
 import type { AppConfig, InboundEvent } from '../../types.js';
 import { normalizeInbound } from '../events.js';
 import { callbackQueuePath } from '../sessions/callbacks.js';
+import { mainSessionRecord } from '../sessions/main.js';
 import {
   getSession,
   insertSession,
@@ -229,11 +229,12 @@ function fixedSessionTarget(
 }
 
 function mainParentCallback(config: AppConfig): ParentCallback {
+  const record = mainSessionRecord(config);
   return {
-    sessionId: MAIN_SESSION_ID,
-    cwd: config.workspaceDir,
-    sessionDir: config.extensions.pi.sessionDir,
-    queuePath: callbackQueuePath(config, MAIN_SESSION_ID),
+    sessionId: record.sessionId,
+    cwd: record.cwd,
+    sessionDir: record.sessionDir,
+    queuePath: callbackQueuePath(config, record.sessionId),
     createdAt: new Date().toISOString(),
   };
 }

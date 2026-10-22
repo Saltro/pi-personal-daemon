@@ -3,6 +3,7 @@ import './extensions/index.js';
 import { runBindCli } from './cli/bind.js';
 import { runCronCli } from './cli/cron.js';
 import { runDaemonCli } from './cli/daemon.js';
+import { runMainSessionCli } from './cli/main-session.js';
 import { runReturnCli } from './cli/return.js';
 import { runSendCli } from './cli/send.js';
 import { runSessionsCli } from './cli/sessions.js';
@@ -19,6 +20,7 @@ function usage(exitCode: number): never {
   retriever return <text...> | --stdin
   retriever bind <destination|feishu-chat|status> ...
   retriever sessions <create|send|list|status|history> ...
+  retriever main-session [status|use <session-id>]
   retriever cron <create|list|status|update|disable|delete> ...
   retriever update [--latest]
   retriever version`);
@@ -34,6 +36,7 @@ async function main(): Promise<void> {
   else if (command === 'return') await runReturnCli(args);
   else if (command === 'bind') await runBindCli(args);
   else if (command === 'sessions') await runSessionsCli(args);
+  else if (command === 'main-session') await runMainSessionCli(args);
   else if (command === 'cron') await runCronCli(args);
   else if (command === 'daemon') await runDaemonCli(args);
   else if (command === undefined) runForegroundDaemon();

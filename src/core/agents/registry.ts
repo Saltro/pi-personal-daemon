@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { AgentProfile, AppConfig } from '../../types.js';
+import { mainSessionRecord } from '../sessions/main.js';
 import type { PersonalSessionRecord } from '../sessions/registry.js';
 import type { AgentAdapter, AgentRunner } from './types.js';
 
@@ -134,7 +135,17 @@ export function sessionAgentProcess(
   return adapterFor(profile.backend).sessionProcess(config, profile, record, prompt);
 }
 
+export function mainSessionAgentProfile(
+  config: AppConfig,
+  record: PersonalSessionRecord,
+): { name: string; profile: AgentProfile } {
+  return record.agentProfile || record.agentProfileSnapshot
+    ? sessionAgentProfile(config, record)
+    : resolveAgentProfile(config);
+}
+
 export function createMainAgentRunner(config: AppConfig): AgentRunner {
-  const { profile } = resolveAgentProfile(config);
-  return adapterFor(profile.backend).createMainRunner(config, profile);
+  const record = mainSessionRecord(config);
+  const { profile } = mainSessionAgentProfile(config, record);
+  return adapterFor(profile.backend).createMainRunner(config, profile, record);
 }

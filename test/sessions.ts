@@ -282,7 +282,7 @@ try {
   assert.equal(success(['status', 'named']).autoReturn, false);
   const listed = command(['list']);
   assert.equal(listed.status, 0, listed.stderr);
-  assert.match(listed.stdout, /^named\tcompleted\tfalse\t/m);
+  assert.match(listed.stdout, /^named\s+completed\s+false\s+/m);
   assert.doesNotMatch(listed.stdout, /notify/i);
   for (const flag of ['--notify', '--no-notify']) {
     const id = `rejected-${flag.slice(2)}`;

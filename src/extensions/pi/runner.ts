@@ -11,6 +11,7 @@ import {
   waitForAgentProcessExit,
 } from '../../core/runtime/process-control.js';
 import { agentProcessEnv } from '../../core/runtime/process-paths.js';
+import type { PersonalSessionRecord } from '../../core/sessions/registry.js';
 import type { AppConfig } from '../../types.js';
 
 interface RpcResponse<T = unknown> {
@@ -42,6 +43,8 @@ export interface PiRpcRunnerOptions {
   cwd?: string;
   bin?: string;
   sessionDir?: string;
+  sessionId?: string;
+  record?: PersonalSessionRecord;
   extraArgs?: string[];
   mock?: boolean;
   spawn?: (
@@ -93,6 +96,7 @@ interface PiRpcRunnerConfig {
 
 export class PiRpcRunner {
   private config: PiRpcRunnerConfig;
+  private record?: PersonalSessionRecord;
   private proc: RpcProcess | null = null;
   private nextId = 1;
   private lastAssistantText = '';
@@ -108,13 +112,14 @@ export class PiRpcRunner {
     options: PiRpcRunnerOptions = {},
   ) {
     this.config = {
-      sessionId: MAIN_SESSION_ID,
+      sessionId: options.sessionId ?? MAIN_SESSION_ID,
       cwd: options.cwd ?? appConfig.workspaceDir,
       bin: options.bin ?? appConfig.extensions.pi.bin,
       sessionDir: options.sessionDir ?? appConfig.extensions.pi.sessionDir,
       extraArgs: options.extraArgs ?? appConfig.extensions.pi.extraArgs,
       mock: options.mock ?? false,
     };
+    this.record = options.record;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 30_000;
     this.settledTimeoutMs = options.settledTimeoutMs ?? 10 * 60 * 1000;
     this.spawnProcess = options.spawn ?? spawn;
@@ -138,7 +143,7 @@ export class PiRpcRunner {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: agentProcessDetached,
-      env: agentProcessEnv(this.appConfig),
+      env: agentProcessEnv(this.appConfig, this.record),
     });
     const reader = readline.createInterface({ input: child.stdout });
     const proc: RpcProcess = {

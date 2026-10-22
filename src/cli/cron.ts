@@ -8,6 +8,7 @@ import {
   type RuntimeCronRecord,
   type RuntimeCronTarget,
 } from '../core/cron/registry.js';
+import { formatTable } from './table.js';
 
 interface ParsedOptions {
   positionals: string[];
@@ -118,10 +119,18 @@ export async function runCronCli(args: string[]): Promise<void> {
     const records = Object.values(loadCronRegistry(config).crons).sort((a, b) =>
       a.id.localeCompare(b.id),
     );
-    for (const record of records)
-      console.log(
-        `${record.id}\t${record.status}\t${record.enabled}\t${record.target}\t${record.nextRunAt || ''}`,
-      );
+    console.log(
+      formatTable(
+        ['ID', 'STATUS', 'ENABLED', 'TARGET', 'NEXT RUN'],
+        records.map((record) => [
+          record.id,
+          record.status,
+          String(record.enabled),
+          record.target,
+          record.nextRunAt || '',
+        ]),
+      ),
+    );
   } else if (command === 'status') {
     const id = opts.positionals[0];
     if (!id) usage();

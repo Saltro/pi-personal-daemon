@@ -61,6 +61,7 @@ class ProcessAgentRunner implements AgentRunner {
   constructor(
     private config: AppConfig,
     private profile: ProcessAgentProfile,
+    private record?: PersonalSessionRecord,
   ) {}
 
   start(): void {
@@ -74,10 +75,10 @@ class ProcessAgentRunner implements AgentRunner {
     if (this.closed) return Promise.reject(new Error('process agent runner is closed'));
     if (this.isRunning())
       return Promise.reject(new Error('process agent is already running or stopping'));
-    const spec = processPrompt(this.config, this.profile, undefined, message);
+    const spec = processPrompt(this.config, this.profile, this.record, message);
     const task = new Promise<string>((resolve, reject) => {
       const child = spawn(spec.command, spec.args, {
-        cwd: this.profile.cwd || this.config.workspaceDir,
+        cwd: this.record?.cwd || this.profile.cwd || this.config.workspaceDir,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: spec.env,
         detached: agentProcessDetached,
@@ -202,9 +203,9 @@ class ProcessAgentRunner implements AgentRunner {
 
 export const processAdapter: AgentAdapter = {
   sessionCapabilities: processCapabilities,
-  createMainRunner(config, profile) {
+  createMainRunner(config, profile, record) {
     if (profile.backend !== 'process') throw new Error('invalid process agent profile');
-    return new ProcessAgentRunner(config, profile);
+    return new ProcessAgentRunner(config, profile, record);
   },
   sessionProcess(config, profile, record, prompt) {
     if (profile.backend !== 'process') throw new Error('invalid process agent profile');

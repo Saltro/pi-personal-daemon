@@ -181,6 +181,17 @@ export function stateTransaction<T>(db: DatabaseSync, operation: () => T): T {
   }
 }
 
+export function readStateMeta(db: DatabaseSync, key: string): string | undefined {
+  const row = db.prepare('SELECT value FROM state_meta WHERE key = ?').get(key);
+  return row ? String(row.value) : undefined;
+}
+
+export function writeStateMeta(db: DatabaseSync, key: string, value: string): void {
+  db.prepare(
+    'INSERT INTO state_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+  ).run(key, value);
+}
+
 export function decodeStateRow<T>(row: Record<string, unknown>, fields: StateFields): T {
   const record: Record<string, unknown> = {};
   for (const [key, kind] of Object.entries(fields)) {

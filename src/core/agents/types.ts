@@ -31,7 +31,11 @@ export interface AgentProcess {
 
 export interface AgentAdapter {
   readonly sessionCapabilities: AgentCapabilities;
-  createMainRunner(config: AppConfig, profile: AgentProfile): AgentRunner;
+  createMainRunner(
+    config: AppConfig,
+    profile: AgentProfile,
+    record?: PersonalSessionRecord,
+  ): AgentRunner;
   sessionProcess(
     config: AppConfig,
     profile: AgentProfile,

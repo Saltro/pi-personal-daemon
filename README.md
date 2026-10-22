@@ -61,7 +61,7 @@ retriever daemon stop
 
 The pid file and background log live in `stateDir` (`daemon.pid`, `daemon.log`), so each state directory is managed independently. `start` refuses to run when a live pid already exists; `status` prints JSON and exits 1 when the daemon is not running. A pid file whose process is gone is reported as `stalePid` and removed by the next `status`, `restart`, or `stop`. Stopping sends `SIGTERM` and waits up to ten seconds for exit; it reports the log path instead of escalating to `SIGKILL`.
 
-Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes executable `dist/retriever` and `dist/retr` helpers. Running `retriever` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, `cron`, and `update` run their subcommands and exit, and `version` prints the installed version. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
+Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes executable `dist/retriever` and `dist/retr` helpers. Running `retriever` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, `main-session`, `cron`, and `update` run their subcommands and exit, and `version` prints the installed version. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
 
 ## Configuration
 
@@ -96,6 +96,26 @@ The static registry in `src/core/channels/registry.ts` defines the adapter bound
 The main session and child sessions use the `pi` backend configured by `extensions.pi`. The main session owns a persistent JSON-lines RPC process; child prompts use Pi's print execution. A main backend without steer queues subsequent user-message batches instead of attempting unsupported steering.
 
 The capability contract and selection logic are in `src/core/agents/`. Backends live in `src/extensions/` and are registered by `src/extensions/agents.ts`, which the daemon, CLI, and session supervisor each import. Add a backend there rather than teaching the core to imitate a backend's CLI protocol.
+
+Inspect and switch the main session:
+
+```bash
+retriever main-session                 # status
+retriever main-session status
+retriever main-session use research-1  # make an existing session the main session
+```
+
+The main session is a normal record in `sessions`; the default id is `personal-agent` and is created on demand. `use` persists the selected session id in the state directory, so every later daemon start resumes that session's Pi id and workspace. Restart the daemon after switching. `status` prints the id, Pi session file, agent profile, workspace, and daemon state.
+
+To migrate an existing Pi session, create a record whose id matches the Pi session id, then select it:
+
+```bash
+retriever sessions create --id <pi-session-id>
+retriever main-session use <pi-session-id>
+retriever daemon restart
+```
+
+Copy the session JSONL into the Pi session directory for the new workspace if it was created elsewhere.
 
 ## Fixed output and returns
 
