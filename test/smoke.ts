@@ -19,7 +19,7 @@ import { isValidFeishuToken } from '../src/extensions/feishu/webhook.js';
 import { normalizeFeishuInbound } from '../src/extensions/feishu/normalize.js';
 import type { AppConfig } from '../src/types.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-daemon-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'retriever-'));
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const cliPath = path.join(repoRoot, 'dist/index.js');
 const outbox = path.join(tmp, 'outbox.jsonl');
@@ -132,7 +132,7 @@ assert.equal(JSON.parse(cli(['bind', 'status']).stdout).binding.chatId, 'oc-test
 await daemon.enqueue({ id: 'return-callback-smoke', source: 'session-callback', kind: 'wake', chatId: 'personal-agent-tryout', text: 'Child session completed.' });
 assert.equal(readCurrentContext(config).eventId, 'return-callback-smoke');
 assert.equal(readFeishuChatBinding(config)?.chatId, 'oc-test');
-cli(['send', '--stdin'], configPath, {}, '**hello** from `pi-personal-daemon send`\n- list item with `inline code`');
+cli(['send', '--stdin'], configPath, {}, '**hello** from `retriever send`\n- list item with `inline code`');
 const sent = jsonl(outbox)[2];
 assert.equal(sent.chatId, 'oc-test');
 assert.equal(sent.inReplyTo, 'return-callback-smoke');
@@ -140,7 +140,7 @@ assert.equal(sent.contextFooter, 'Context usage unavailable');
 assert.equal(sent.msgType, 'interactive');
 assert.equal(sent.card.schema, '2.0');
 assert.equal(sent.card.config.width_mode, 'fill');
-assert.equal(sent.card.body.elements[0].content, '**hello** from `pi-personal-daemon send`\n- list item with `inline code`');
+assert.equal(sent.card.body.elements[0].content, '**hello** from `retriever send`\n- list item with `inline code`');
 assert.match(sent.card.body.elements[2].content, /<font color="grey"><font size="small">Context usage unavailable/);
 assert.equal(readCurrentContext(config).sendCount, 1);
 
@@ -240,8 +240,8 @@ assert.match(fixedLog, /fixed child prompt a/);
 assert.match(fixedLog, /fixed child prompt b/);
 assert.equal(listParentNotifications(targetConfig).length, 0);
 cli(['return', '--stdin'], targetPath, {
-  PI_PERSONAL_SESSION_ID: 'fixed-child',
-  PI_PERSONAL_PARENT_CALLBACK: JSON.stringify(targetSessions['fixed-child'].parentCallback),
+  RETRIEVER_SESSION_ID: 'fixed-child',
+  RETRIEVER_PARENT_CALLBACK: JSON.stringify(targetSessions['fixed-child'].parentCallback),
 }, 'explicit cron child return');
 const notices = listParentNotifications(targetConfig);
 assert.equal(notices.length, 1);
@@ -267,8 +267,8 @@ function feishuMessage(id: string, messageId: string, text: string) {
 }
 
 function cli(args: string[], file = configPath, env: NodeJS.ProcessEnv = {}, input?: string, cwd = repoRoot) {
-  const childEnv: NodeJS.ProcessEnv = { ...process.env, PERSONAL_DAEMON_CONFIG: file };
-  for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'PI_PERSONAL_SESSION_ID', 'PI_PERSONAL_PARENT_CALLBACK']) delete childEnv[key];
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, RETRIEVER_CONFIG: file };
+  for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'RETRIEVER_SESSION_ID', 'RETRIEVER_PARENT_CALLBACK']) delete childEnv[key];
   const result = spawnSync(process.execPath, [cliPath, ...args], { cwd, env: { ...childEnv, ...env }, input, encoding: 'utf8', timeout: 10000 });
   assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr || result.error}`);
   return result;

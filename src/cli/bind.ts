@@ -3,9 +3,9 @@ import { bindingPath, readFeishuChatBinding, writeFeishuChatBinding } from '../c
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal-daemon bind destination --chat-id <chat_id>
-  pi-personal-daemon bind feishu-chat --chat-id <chat_id>
-  pi-personal-daemon bind status`);
+  retriever bind destination --chat-id <chat_id>
+  retriever bind feishu-chat --chat-id <chat_id>
+  retriever bind status`);
   process.exit(2);
 }
 

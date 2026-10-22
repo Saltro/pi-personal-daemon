@@ -3,12 +3,12 @@ import path from 'node:path';
 import type { AppConfig } from '../../types.js';
 
 export function defaultStateDir(): string {
-  return path.join(os.homedir(), '.cache', 'pi-personal-daemon');
+  return path.join(os.homedir(), '.cache', 'retriever');
 }
 
 export function stateDir(config: AppConfig): string {
-  // Preserve the legacy registry/binding/callback root. contextFile selects only
-  // the legacy context import source; callers needing isolation set stateDir.
+  // contextFile selects only the legacy context import source; callers
+  // needing isolation set an explicit stateDir.
   return config.runtime.stateDir || defaultStateDir();
 }
 
@@ -17,7 +17,7 @@ export function stateDbPath(config: AppConfig): string {
 }
 
 export function defaultContextFile(): string {
-  return path.join(os.tmpdir(), 'pi-personal-daemon-current-context.json');
+  return path.join(os.tmpdir(), 'retriever-current-context.json');
 }
 
 export function contextFile(config: AppConfig): string {

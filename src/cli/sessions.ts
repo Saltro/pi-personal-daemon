@@ -29,11 +29,11 @@ interface ParsedOptions {
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal-daemon sessions create [--id <id>] [--cwd <cwd>] [--name <name>] [--agent <profile>] [--return|--no-return] [--prompt <text>] [--stdin] [--wait]
-  pi-personal-daemon sessions send <id> [--message <text>] [--stdin] [--wait] [--return|--no-return]
-  pi-personal-daemon sessions list
-  pi-personal-daemon sessions status <id>
-  pi-personal-daemon sessions history <id> [--lines <n>]`);
+  retriever sessions create [--id <id>] [--cwd <cwd>] [--name <name>] [--agent <profile>] [--return|--no-return] [--prompt <text>] [--stdin] [--wait]
+  retriever sessions send <id> [--message <text>] [--stdin] [--wait] [--return|--no-return]
+  retriever sessions list
+  retriever sessions status <id>
+  retriever sessions history <id> [--lines <n>]`);
   process.exit(2);
 }
 

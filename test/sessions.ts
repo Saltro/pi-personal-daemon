@@ -14,7 +14,7 @@ import { listParentNotifications } from '../src/core/sessions/callbacks.js';
 import type { AppConfig } from '../src/types.js';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-sessions-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'retriever-sessions-'));
 const configPath = path.join(tmp, 'config.json');
 const foreignCwd = path.join(tmp, 'foreign');
 fs.mkdirSync(foreignCwd);
@@ -25,7 +25,7 @@ const descendantCode = `require('node:fs').writeFileSync(${JSON.stringify(descen
 fs.writeFileSync(treeHarness, `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendantCode)}],{stdio:['ignore',1,2]});setInterval(()=>{},1000);`);
 const unicodeHarness = path.join(tmp, 'unicode-harness.cjs');
 fs.writeFileSync(unicodeHarness, `const bytes=Buffer.from('你好🙂');let i=0;const timer=setInterval(()=>{process.stdout.write(bytes.subarray(i,i+1));if(++i===bytes.length)clearInterval(timer);},5);`);
-fs.writeFileSync(harness, `const fs=require('node:fs');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(process.argv.includes('--print'))process.exit(42);console.log('START '+process.pid);setTimeout(()=>{console.log(JSON.stringify({prompt,pid:process.pid,config:process.env.PERSONAL_DAEMON_CONFIG,path:process.env.PATH,session:process.env.PI_PERSONAL_SESSION_ID}));},1200);});`);
+fs.writeFileSync(harness, `const fs=require('node:fs');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(process.argv.includes('--print'))process.exit(42);console.log('START '+process.pid);setTimeout(()=>{console.log(JSON.stringify({prompt,pid:process.pid,config:process.env.RETRIEVER_CONFIG,path:process.env.PATH,session:process.env.RETRIEVER_SESSION_ID}));},1200);});`);
 const config: AppConfig = {
   agent: { sessionId: 'main', cwd: tmp, piBin: 'pi', extraArgs: [], mock: true },
   agentProfiles: {
@@ -45,12 +45,12 @@ const config: AppConfig = {
   runtime: { stateDir: path.join(tmp, 'state'), configPath },
 };
 const returnHarness = path.join(tmp, 'return-harness.cjs');
-fs.writeFileSync(returnHarness, `const {execFileSync}=require('node:child_process');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{execFileSync('pi-personal-daemon',['return','--stdin'],{input:prompt,stdio:['pipe','pipe','inherit']});console.log('explicit return queued');});`);
+fs.writeFileSync(returnHarness, `const {execFileSync}=require('node:child_process');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{execFileSync('retriever',['return','--stdin'],{input:prompt,stdio:['pipe','pipe','inherit']});console.log('explicit return queued');});`);
 config.agentProfiles!.returns = { backend: 'process', command: process.execPath, args: [returnHarness] };
 fs.writeFileSync(configPath, JSON.stringify(config));
 const cli = path.join(project, 'dist', 'index.js');
-const env: NodeJS.ProcessEnv = { ...process.env, PERSONAL_DAEMON_CONFIG: configPath };
-for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'PI_PERSONAL_SESSION_ID', 'PI_PERSONAL_PARENT_CALLBACK', 'PI_DAEMON_AGENT_PROFILE', 'PI_DAEMON_MOCK', 'PI_DAEMON_STATE_DIR']) delete env[key];
+const env: NodeJS.ProcessEnv = { ...process.env, RETRIEVER_CONFIG: configPath };
+for (const key of ['PI_SESSION_ID', 'PI_SESSION_FILE', 'RETRIEVER_SESSION_ID', 'RETRIEVER_PARENT_CALLBACK', 'RETRIEVER_AGENT_PROFILE', 'RETRIEVER_AGENT_MOCK', 'RETRIEVER_STATE_DIR']) delete env[key];
 function command(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [cli, 'sessions', ...args], { cwd: foreignCwd, encoding: 'utf8', env: { ...env, ...extraEnv }, timeout: 15_000 });
 }
@@ -93,7 +93,7 @@ try {
     assert.ok(notices.every(notice => notice.type === 'session.return' && notice.parent.sessionId === 'main'));
     assert.equal(continued.parentNotificationPath, undefined);
     const fallback = spawnSync(process.execPath, [cli, 'return', '--stdin'], {
-      cwd: foreignCwd, encoding: 'utf8', input: `registry fallback ${id}`, env: { ...env, PI_PERSONAL_SESSION_ID: id }, timeout: 15_000,
+      cwd: foreignCwd, encoding: 'utf8', input: `registry fallback ${id}`, env: { ...env, RETRIEVER_SESSION_ID: id }, timeout: 15_000,
     });
     assert.equal(fallback.status, 0, fallback.stderr);
     assert.equal(listParentNotifications(config).filter(notice => notice.child?.id === id).length, 3);

@@ -1,12 +1,40 @@
 {
-  "name": "pi-personal-daemon",
+  "name": "@saltroping/retriever",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
-    "pi-personal-daemon": "./dist/index.js"
+    "retriever": "./dist/index.js",
+    "retr": "./dist/index.js"
   },
-  "description": "Single-chat personal daemon with pluggable channel and agent adapters",
+  "files": [
+    "dist",
+    "config.example.json"
+  ],
+  "description": "Personal agent daemon: one chat surface, child sessions that return to the main agent, and scheduled wakeups; pluggable channel and agent adapters",
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "Saltro Ping",
+  "homepage": "https://github.com/Saltro/retriever#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Saltro/retriever.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Saltro/retriever/issues"
+  },
+  "keywords": [
+    "agent",
+    "daemon",
+    "personal-assistant",
+    "cli",
+    "chatops",
+    "feishu",
+    "lark",
+    "cron",
+    "automation"
+  ],
   "packageManager": "pnpm@10.34.4",
   "scripts": {
     "build": "rsbuild build && node scripts/fix-bin.js",

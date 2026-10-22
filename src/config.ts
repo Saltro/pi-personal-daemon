@@ -58,7 +58,7 @@ function boolEnv(value: string | undefined, fallback: boolean): boolean {
 }
 
 export function loadConfig(): AppConfig {
-  const configPath = path.resolve(process.env.PERSONAL_DAEMON_CONFIG || path.join(process.cwd(), 'config.json'));
+  const configPath = path.resolve(process.env.RETRIEVER_CONFIG || path.join(process.cwd(), 'config.json'));
   let fileConfig: Partial<AppConfig> = {};
   if (fs.existsSync(configPath)) {
     fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Partial<AppConfig>;
@@ -66,27 +66,27 @@ export function loadConfig(): AppConfig {
 
   const envConfig = {
     agent: {
-      sessionId: process.env.PI_DAEMON_SESSION_ID,
-      cwd: process.env.PI_DAEMON_CWD,
+      sessionId: process.env.RETRIEVER_AGENT_SESSION_ID,
+      cwd: process.env.RETRIEVER_AGENT_CWD,
       piBin: process.env.PI_BIN,
-      sessionDir: process.env.PI_DAEMON_SESSION_DIR,
-      extraArgs: process.env.PI_DAEMON_EXTRA_ARGS ? process.env.PI_DAEMON_EXTRA_ARGS.split(' ').filter(Boolean) : undefined,
-      mock: process.env.PI_DAEMON_MOCK ? boolEnv(process.env.PI_DAEMON_MOCK, false) : undefined,
-      profile: process.env.PI_DAEMON_AGENT_PROFILE,
+      sessionDir: process.env.RETRIEVER_AGENT_SESSION_DIR,
+      extraArgs: process.env.RETRIEVER_AGENT_EXTRA_ARGS ? process.env.RETRIEVER_AGENT_EXTRA_ARGS.split(' ').filter(Boolean) : undefined,
+      mock: process.env.RETRIEVER_AGENT_MOCK ? boolEnv(process.env.RETRIEVER_AGENT_MOCK, false) : undefined,
+      profile: process.env.RETRIEVER_AGENT_PROFILE,
     },
-    channel: { type: process.env.PI_DAEMON_CHANNEL },
+    channel: { type: process.env.RETRIEVER_CHANNEL },
     http: {
-      enabled: process.env.PI_DAEMON_HTTP_ENABLED ? boolEnv(process.env.PI_DAEMON_HTTP_ENABLED, true) : undefined,
-      host: process.env.PI_DAEMON_HTTP_HOST,
-      port: process.env.PI_DAEMON_HTTP_PORT ? Number(process.env.PI_DAEMON_HTTP_PORT) : undefined,
-      path: process.env.PI_DAEMON_HTTP_PATH,
+      enabled: process.env.RETRIEVER_HTTP_ENABLED ? boolEnv(process.env.RETRIEVER_HTTP_ENABLED, true) : undefined,
+      host: process.env.RETRIEVER_HTTP_HOST,
+      port: process.env.RETRIEVER_HTTP_PORT ? Number(process.env.RETRIEVER_HTTP_PORT) : undefined,
+      path: process.env.RETRIEVER_HTTP_PATH,
     },
     stdin: {
-      enabled: process.env.PI_DAEMON_STDIN_ENABLED ? boolEnv(process.env.PI_DAEMON_STDIN_ENABLED, true) : undefined,
+      enabled: process.env.RETRIEVER_STDIN_ENABLED ? boolEnv(process.env.RETRIEVER_STDIN_ENABLED, true) : undefined,
     },
     sender: {
-      type: process.env.PI_DAEMON_SENDER,
-      mockOutbox: process.env.PI_DAEMON_MOCK_OUTBOX,
+      type: process.env.RETRIEVER_SENDER,
+      mockOutbox: process.env.RETRIEVER_MOCK_OUTBOX,
     },
     feishu: {
       appId: process.env.FEISHU_APP_ID,
@@ -97,11 +97,11 @@ export function loadConfig(): AppConfig {
       eventMode: process.env.FEISHU_EVENT_MODE as 'ws' | 'webhook' | 'both' | undefined,
     },
     scheduler: {
-      enabled: process.env.PI_DAEMON_SCHEDULER_ENABLED ? boolEnv(process.env.PI_DAEMON_SCHEDULER_ENABLED, false) : undefined,
+      enabled: process.env.RETRIEVER_SCHEDULER_ENABLED ? boolEnv(process.env.RETRIEVER_SCHEDULER_ENABLED, false) : undefined,
     },
     runtime: {
-      contextFile: process.env.PI_DAEMON_CONTEXT_FILE,
-      stateDir: process.env.PI_DAEMON_STATE_DIR,
+      contextFile: process.env.RETRIEVER_CONTEXT_FILE,
+      stateDir: process.env.RETRIEVER_STATE_DIR,
     },
   };
 

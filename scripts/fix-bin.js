@@ -9,5 +9,8 @@ for (const file of ['dist/index.js', 'dist/session-watcher.js']) {
   }
   fs.chmodSync(file, 0o755);
 }
-fs.copyFileSync('dist/index.js', 'dist/pi-personal-daemon');
-fs.chmodSync('dist/pi-personal-daemon', 0o755);
+// PATH-callable copies for agent subprocesses and manual dist-on-PATH usage.
+for (const helper of ['dist/retriever', 'dist/retr']) {
+  fs.copyFileSync('dist/index.js', helper);
+  fs.chmodSync(helper, 0o755);
+}

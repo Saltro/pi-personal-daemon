@@ -1,12 +1,23 @@
-# pi-personal-daemon
+# retriever
 
 A local personal daemon with one visible chat destination, a main agent, child sessions, and timed wakeups. Feishu and Pi are the default adapters; channel implementations and per-session agent backends can be selected independently.
 
 **Single-chat and fixed visible output are product choices.** This is not a multi-chat router. All explicit child returns and requested completion notices go to the main agent. Agent-native history, tools, memory, skills, and compression stay with the selected backend.
 
-## Install and test
+## Install
 
-Requires Node **22.13+**, pnpm **10.34.4**, and a Unix-like environment (macOS/Linux with `ps`) for the supervised process lifecycle. SQLite uses Node's built-in `node:sqlite`; some supported Node versions emit an experimental warning. The test suite was run on macOS with Node 24.13.1; the minimum Node version has not been exercised here.
+```bash
+npm install -g @saltroping/retriever
+retriever --help
+# retr is an alias for every subcommand:
+retr daemon status
+```
+
+Retriever runs on Node **22.13+** in a Unix-like environment (macOS/Linux with `ps`). SQLite uses Node's built-in `node:sqlite`; some supported Node versions emit an experimental warning.
+
+## Develop and test
+
+Developing from a clone requires pnpm **10.34.4** and the same Node/Unix environment above.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -22,31 +33,31 @@ pnpm run build
 node dist/index.js
 # With dist on PATH, the same entry runs subcommands:
 export PATH="$PWD/dist:$PATH"
-pi-personal-daemon --help
+retriever --help
 # Source-mode development:
 pnpm run dev
 ```
 
 ### Daemon lifecycle
 
-Running `pi-personal-daemon` with no arguments stays in the foreground and logs to stderr. For a detached daemon:
+Running `retriever` with no arguments stays in the foreground and logs to stderr. For a detached daemon:
 
 ```bash
-pi-personal-daemon daemon start
-pi-personal-daemon daemon status
-pi-personal-daemon daemon restart
-pi-personal-daemon daemon stop
+retriever daemon start
+retriever daemon status
+retriever daemon restart
+retriever daemon stop
 ```
 
 The pid file and background log live in `runtime.stateDir` (`daemon.pid`, `daemon.log`), so each state directory is managed independently. `start` refuses to run when a live pid already exists; `status` prints JSON and exits 1 when the daemon is not running. A pid file whose process is gone is reported as `stalePid` and removed by the next `status`, `restart`, or `stop`. Stopping sends `SIGTERM` and waits up to ten seconds for exit; it reports the log path instead of escalating to `SIGKILL`.
 
-Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes an executable `dist/pi-personal-daemon` helper. Running `pi-personal-daemon` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, and `cron` run their subcommands and exit. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
+Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes executable `dist/retriever` and `dist/retr` helpers. Running `retriever` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, and `cron` run their subcommands and exit. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
 
 ## Configuration
 
-`PERSONAL_DAEMON_CONFIG` selects a config file; otherwise the CLI loads `config.json` from its current directory. `src/config.ts` merges defaults, file configuration, and existing environment overrides. The resolved config path is passed to child processes, including when their working directory differs from the install directory.
+`RETRIEVER_CONFIG` selects a config file; otherwise the CLI loads `config.json` from its current directory. `src/config.ts` merges defaults, file configuration, and existing environment overrides. The resolved config path is passed to child processes, including when their working directory differs from the install directory.
 
-Existing Pi/Feishu configuration remains supported:
+Default adapter configuration (Feishu channel, Pi agent profile):
 
 ```json
 {
@@ -63,12 +74,12 @@ Existing Pi/Feishu configuration remains supported:
 }
 ```
 
-Common overrides: `PI_DAEMON_SESSION_ID`, `PI_DAEMON_CWD`, `PI_BIN`, `PI_DAEMON_SESSION_DIR`, `PI_DAEMON_EXTRA_ARGS`, `PI_DAEMON_MOCK`, `PI_DAEMON_CHANNEL`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_VERIFICATION_TOKEN`, `FEISHU_ENCRYPT_KEY`, and `FEISHU_BASE_URL`. Existing state/context environment overrides remain supported. Extra args from the existing environment variable are space-separated; use JSON arrays for arguments containing spaces.
+Common overrides: `RETRIEVER_AGENT_SESSION_ID`, `RETRIEVER_AGENT_CWD`, `PI_BIN`, `RETRIEVER_AGENT_SESSION_DIR`, `RETRIEVER_AGENT_EXTRA_ARGS`, `RETRIEVER_AGENT_MOCK`, `RETRIEVER_CHANNEL`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_VERIFICATION_TOKEN`, `FEISHU_ENCRYPT_KEY`, and `FEISHU_BASE_URL`. Extra args are space-separated in the environment variable; use JSON arrays in config for arguments containing spaces.
 
 ### Channel adapters
 
 - **`feishu`** (default): existing webhook / WebSocket receivers, interactive-card sender, reactions, and ten-second user-message debounce. `sender.type=mock` writes cards and reactions to JSONL instead of calling Feishu.
-- **`stdio`**: stdin ingestion and plain-text stdout output from `pi-personal-daemon send`; no Feishu receiver, card, reaction, or debounce. Output belongs to the send process's stdout, so it is useful for local pipelines/debugging rather than a separate terminal notification service.
+- **`stdio`**: stdin ingestion and plain-text stdout output from `retriever send`; no Feishu receiver, card, reaction, or debounce. Output belongs to the send process's stdout, so it is useful for local pipelines/debugging rather than a separate terminal notification service.
 
 `stdin.enabled` remains an optional input source with either adapter. Feishu `eventMode` accepts `ws`, `webhook`, or both via the existing configuration. Real Feishu sending needs `sender.type=feishu` and app credentials. Webhook verification / encrypted payload handling remains in the Feishu receiver.
 
@@ -119,23 +130,23 @@ The capability contract and selection logic are in `src/core/agents/`. Backends 
 Bind the single visible destination:
 
 ```bash
-pi-personal-daemon bind destination --chat-id oc_xxx
+retriever bind destination --chat-id oc_xxx
 # Compatibility alias:
-pi-personal-daemon bind feishu-chat --chat-id oc_xxx
-pi-personal-daemon bind status
-pi-personal-daemon send '**hello** from markdown'
-printf 'longer reply' | pi-personal-daemon send --stdin
+retriever bind feishu-chat --chat-id oc_xxx
+retriever bind status
+retriever send '**hello** from markdown'
+printf 'longer reply' | retriever send --stdin
 ```
 
 The first real Feishu message auto-binds when no destination exists. Every visible reply uses the bound destination, not the latest callback's parent metadata. `stdio` can send without a prior binding.
 
-The daemon does not automatically forward final agent text. Prompts tell the agent to use `pi-personal-daemon send` for visible output. Feishu renders card JSON 2.0 markdown and a grey context occupancy footer. Send accounting updates the current SQLite context atomically; an event switch while the network send is in flight does not increment the new event's count.
+The daemon does not automatically forward final agent text. Prompts tell the agent to use `retriever send` for visible output. Feishu renders card JSON 2.0 markdown and a grey context occupancy footer. Send accounting updates the current SQLite context atomically; an event switch while the network send is in flight does not increment the new event's count.
 
 `return` is a separate path to the main agent:
 
 ```bash
-pi-personal-daemon return 'short result for main'
-printf 'longer report' | pi-personal-daemon return --stdin
+retriever return 'short result for main'
+printf 'longer report' | retriever return --stdin
 ```
 
 It needs parent metadata supplied by a session/cron launch or the surrounding Pi process. It does not send a visible chat message.
@@ -143,13 +154,13 @@ It needs parent metadata supplied by a session/cron launch or the surrounding Pi
 ## Sessions
 
 ```bash
-pi-personal-daemon sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
-pi-personal-daemon sessions send research-1 --message 'continue with Y' --wait
-pi-personal-daemon sessions create --agent other-harness --prompt 'run asynchronously' --no-return
-pi-personal-daemon sessions create --prompt 'run and return the result to main' --return
-pi-personal-daemon sessions list
-pi-personal-daemon sessions status research-1
-pi-personal-daemon sessions history research-1 --lines 80
+retriever sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
+retriever sessions send research-1 --message 'continue with Y' --wait
+retriever sessions create --agent other-harness --prompt 'run asynchronously' --no-return
+retriever sessions create --prompt 'run and return the result to main' --return
+retriever sessions list
+retriever sessions status research-1
+retriever sessions history research-1 --lines 80
 ```
 
 - Each record saves the session ID, agent selection/snapshot, working directory, status, run token, worker/supervisor PID, return settings, timestamps, last prompt/result, and log path.
@@ -158,16 +169,16 @@ pi-personal-daemon sessions history research-1 --lines 80
 - PID loss is failure/interruption, never proof of successful completion. A still-live worker, supervisor, or owned process group prevents accidental restart overlap. Unix timeout/cancellation terminates the owned group and confirms exit before releasing the run; pipe decoding preserves UTF-8 across chunks.
 - Duplicate explicit session IDs are rejected, not overwritten.
 - CLI `history` shows the daemon execution log; native backend history stays with the backend.
-- `--return` enables automatic return to main when a run finishes; `--no-return` disables it. The session record stores this choice as `autoReturn`. Explicit `pi-personal-daemon return` calls work independently of that switch. Creating or sending from a parent agent records return metadata regardless of the flag; sends without parent context retain the saved metadata. Previously affected sessions missing metadata regain it on their next send from the parent.
+- `--return` enables automatic return to main when a run finishes; `--no-return` disables it. The session record stores this choice as `autoReturn`. Explicit `retriever return` calls work independently of that switch. Creating or sending from a parent agent records return metadata regardless of the flag; sends without parent context retain the saved metadata. Previously affected sessions missing metadata regain it on their next send from the parent.
 - Without a flag, automatic return defaults on only if `PI_SESSION_ID` or `PI_SESSION_FILE` is present. Outside Pi it defaults off.
 
 Completion state and its requested callback are committed together in SQLite. Callback records are claimed one at a time when main actually begins delivery and acknowledged after agent processing; a waiting backlog does not consume retry attempts. A failed delivery is retried with a short backoff, up to three attempts. Interrupted claims recover on daemon startup; exhausted records remain failed for inspection. This provides bounded retry, **not exactly-once external side effects**. A crash after an agent acts but before acknowledgment can cause duplicate processing.
 
 ## SQLite state and migration
 
-Mutable daemon state lives in `runtime.stateDir/state.sqlite`, defaulting to `~/.cache/pi-personal-daemon/state.sqlite`. Session/cron records are independent SQL records; current context and output binding remain singleton state. WAL, a busy timeout, short transactions, field updates, and conditional run-token writes handle multiple CLI/watcher processes.
+Mutable daemon state lives in `runtime.stateDir/state.sqlite`, defaulting to `~/.cache/retriever/state.sqlite`. Session/cron records are independent SQL records; current context and output binding remain singleton state. WAL, a busy timeout, short transactions, field updates, and conditional run-token writes handle multiple CLI/watcher processes.
 
-`runtime.contextFile` only selects the legacy context import location; it does not change the state directory. Without `stateDir`, the legacy default `~/.cache/pi-personal-daemon` is preserved so existing sessions, crons, binding, and callbacks are found. Tests and isolated clients must set an explicit temporary `stateDir`. `contextFile` is not an actively rewritten JSON projection.
+`runtime.contextFile` only selects the legacy context import location; it does not change the state directory. Without `stateDir`, state lives in `~/.cache/retriever`, so sessions, crons, binding, and callbacks share one root. Tests and isolated clients must set an explicit temporary `stateDir`. `contextFile` is not an actively rewritten JSON projection.
 
 First database access imports existing daemon JSON state transactionally and once:
 
@@ -202,14 +213,14 @@ Supported fields: `minute hour day-of-month month day-of-week`; `*`, `*/n`, numb
 Persisted runtime schedules:
 
 ```bash
-pi-personal-daemon cron create --id hourly --cron '0 * * * *' --prompt 'Hourly wakeup' --target main
-pi-personal-daemon cron create --id one-shot --at '2026-11-01T09:30:00+08:00' --prompt 'One-shot task' --target new
-pi-personal-daemon cron create --id shadow --cron '0 */2 * * *' --prompt 'Heartbeat' --target session:research-1
-pi-personal-daemon cron list
-pi-personal-daemon cron status hourly
-pi-personal-daemon cron update hourly --prompt 'Updated prompt'
-pi-personal-daemon cron disable hourly
-pi-personal-daemon cron delete hourly
+retriever cron create --id hourly --cron '0 * * * *' --prompt 'Hourly wakeup' --target main
+retriever cron create --id one-shot --at '2026-11-01T09:30:00+08:00' --prompt 'One-shot task' --target new
+retriever cron create --id shadow --cron '0 */2 * * *' --prompt 'Heartbeat' --target session:research-1
+retriever cron list
+retriever cron status hourly
+retriever cron update hourly --prompt 'Updated prompt'
+retriever cron disable hourly
+retriever cron delete hourly
 ```
 
 - `main`: enqueue a wake into main.

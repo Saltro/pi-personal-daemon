@@ -11,8 +11,8 @@ import { newSessionRecord } from '../src/core/sessions/registry.js';
 import { selectSessionAgent } from '../src/core/sessions/service.js';
 import type { AppConfig, ProcessAgentProfile } from '../src/types.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-agents-'));
-const originalConfigEnv = process.env.PERSONAL_DAEMON_CONFIG;
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'retriever-agents-'));
+const originalConfigEnv = process.env.RETRIEVER_CONFIG;
 try {
   const config: AppConfig = {
     agent: { sessionId: 'main', cwd: tmp, piBin: '/global/pi', extraArgs: ['--global'], mock: true },
@@ -155,18 +155,18 @@ try {
 
   const configPath = path.join(tmp, 'relative-config.json');
   fs.writeFileSync(configPath, JSON.stringify({ ...config, agent: { ...config.agent, cwd: './work' }, channel: { type: 'mock' }, runtime: { stateDir: './state' } }));
-  process.env.PERSONAL_DAEMON_CONFIG = configPath;
+  process.env.RETRIEVER_CONFIG = configPath;
   const loaded = loadConfig();
   assert.equal(loaded.channel?.type, 'mock');
   assert.equal(loaded.agent.cwd, path.join(tmp, 'work'));
   assert.equal(loaded.runtime.stateDir, path.join(tmp, 'state'));
   assert.equal(absoluteConfigPath(loaded), configPath);
-  assert.equal(agentProcessEnv(loaded).PERSONAL_DAEMON_CONFIG, configPath);
+  assert.equal(agentProcessEnv(loaded).RETRIEVER_CONFIG, configPath);
   assert.ok(path.isAbsolute(helperBinDirectory()));
   assert.equal(agentProcessEnv(loaded).PATH?.split(path.delimiter)[0], helperBinDirectory());
   console.log('agents tests passed');
 } finally {
-  if (originalConfigEnv === undefined) delete process.env.PERSONAL_DAEMON_CONFIG;
-  else process.env.PERSONAL_DAEMON_CONFIG = originalConfigEnv;
+  if (originalConfigEnv === undefined) delete process.env.RETRIEVER_CONFIG;
+  else process.env.RETRIEVER_CONFIG = originalConfigEnv;
   fs.rmSync(tmp, { recursive: true, force: true });
 }

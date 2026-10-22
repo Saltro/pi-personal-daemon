@@ -12,13 +12,13 @@ import { daemonStatus, removeDaemonPid, writeDaemonPid } from './core/daemon/lif
 
 function usage(exitCode: number): never {
   console.error(`Usage:
-  pi-personal-daemon
-  pi-personal-daemon daemon <start|stop|restart|status>
-  pi-personal-daemon send <text...> | --stdin
-  pi-personal-daemon return <text...> | --stdin
-  pi-personal-daemon bind <destination|feishu-chat|status> ...
-  pi-personal-daemon sessions <create|send|list|status|history> ...
-  pi-personal-daemon cron <create|list|status|update|disable|delete> ...`);
+  retriever
+  retriever daemon <start|stop|restart|status>
+  retriever send <text...> | --stdin
+  retriever return <text...> | --stdin
+  retriever bind <destination|feishu-chat|status> ...
+  retriever sessions <create|send|list|status|history> ...
+  retriever cron <create|list|status|update|disable|delete> ...`);
   process.exit(exitCode);
 }
 
@@ -54,6 +54,6 @@ function runForegroundDaemon(): void {
 }
 
 main().catch(error => {
-  console.error(`[pi-personal-daemon] ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`[retriever] ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

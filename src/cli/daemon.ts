@@ -8,10 +8,10 @@ import type { AppConfig } from '../types.js';
 
 function usage(): never {
   console.error(`Usage:
-  pi-personal-daemon daemon start
-  pi-personal-daemon daemon stop
-  pi-personal-daemon daemon restart
-  pi-personal-daemon daemon status`);
+  retriever daemon start
+  retriever daemon stop
+  retriever daemon restart
+  retriever daemon status`);
   process.exit(2);
 }
 

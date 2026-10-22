@@ -3,7 +3,7 @@ import { readFeishuChatBinding as readOutputBinding } from '../core/state/bindin
 import { createChannelAdapter } from '../core/channels/registry.js';
 import { readCurrentContext, recordContextSend } from '../core/state/context.js';
 
-export function sendUsage(command = 'pi-personal-daemon send'): never {
+export function sendUsage(command = 'retriever send'): never {
   console.error(`Usage: ${command} <text...> | --stdin`);
   process.exit(2);
 }
@@ -14,7 +14,7 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-export async function runSendCli(args: string[], command = 'pi-personal-daemon send'): Promise<void> {
+export async function runSendCli(args: string[], command = 'retriever send'): Promise<void> {
   let text: string;
   if (args.length === 1 && args[0] === '--stdin') {
     text = await readStdin();
@@ -30,7 +30,7 @@ export async function runSendCli(args: string[], command = 'pi-personal-daemon s
   const config = loadConfig();
   const channel = createChannelAdapter(config);
   const binding = readOutputBinding(config);
-  if (!binding && channel.type !== 'stdio') throw new Error('Output destination is not bound. Run: pi-personal-daemon bind destination --chat-id <chat_id>');
+  if (!binding && channel.type !== 'stdio') throw new Error('Output destination is not bound. Run: retriever bind destination --chat-id <chat_id>');
   const chatId = binding?.chatId || 'stdio';
   const context = tryReadCurrentContext(config);
   await channel.sender.send({

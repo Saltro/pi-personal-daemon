@@ -2,7 +2,7 @@ import { loadConfig } from '../config.js';
 import { writeParentReturnNotification } from '../core/sessions/callbacks.js';
 import { getSession, type ParentCallback } from '../core/sessions/registry.js';
 
-export function returnUsage(command = 'pi-personal-daemon return'): never {
+export function returnUsage(command = 'retriever return'): never {
   console.error(`Usage: ${command} <text...> | --stdin`);
   process.exit(2);
 }
@@ -13,7 +13,7 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-export async function runReturnCli(args: string[], command = 'pi-personal-daemon return'): Promise<void> {
+export async function runReturnCli(args: string[], command = 'retriever return'): Promise<void> {
   let text: string;
   if (args.length === 1 && args[0] === '--stdin') {
     text = await readStdin();
@@ -29,15 +29,15 @@ export async function runReturnCli(args: string[], command = 'pi-personal-daemon
   const config = loadConfig();
   const parent = findParentCallback(config);
   if (!parent) throw new Error('parent callback metadata not found; create or send the child from a parent agent session, or run from a cron target session; --return only controls automatic completion notices');
-  const file = writeParentReturnNotification(config, parent, text, process.env.PI_PERSONAL_SESSION_ID || process.env.PI_SESSION_ID);
+  const file = writeParentReturnNotification(config, parent, text, process.env.RETRIEVER_SESSION_ID || process.env.PI_SESSION_ID);
   console.error(`[${command}] queued parent return ${file}`);
 }
 
 function findParentCallback(config: ReturnType<typeof loadConfig>): ParentCallback | undefined {
-  const encoded = process.env.PI_PERSONAL_PARENT_CALLBACK;
+  const encoded = process.env.RETRIEVER_PARENT_CALLBACK;
   if (encoded) return JSON.parse(encoded) as ParentCallback;
 
-  const personalSessionId = process.env.PI_PERSONAL_SESSION_ID;
+  const personalSessionId = process.env.RETRIEVER_SESSION_ID;
   if (personalSessionId) {
     try {
       return getSession(config, personalSessionId).parentCallback;

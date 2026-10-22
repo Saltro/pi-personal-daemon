@@ -48,20 +48,20 @@ export function selfCommand(args: string[]): { command: string; args: string[] }
 }
 
 export function absoluteConfigPath(config: AppConfig): string {
-  return path.resolve(config.runtime.configPath || process.env.PERSONAL_DAEMON_CONFIG || 'config.json');
+  return path.resolve(config.runtime.configPath || process.env.RETRIEVER_CONFIG || 'config.json');
 }
 
 export function agentProcessEnv(config: AppConfig, record?: PersonalSessionRecord, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...extra,
-    PERSONAL_DAEMON_CONFIG: absoluteConfigPath(config),
+    RETRIEVER_CONFIG: absoluteConfigPath(config),
     PATH: `${helperBinDirectory()}${path.delimiter}${extra.PATH ?? process.env.PATH ?? ''}`,
-    PI_PERSONAL_SESSION_ID: record?.id || config.agent.sessionId,
+    RETRIEVER_SESSION_ID: record?.id || config.agent.sessionId,
     PI_SESSION_ID: record?.sessionId || config.agent.sessionId,
   };
   // Do not leak an enclosing child session's callback into an unrelated execution.
-  delete env.PI_PERSONAL_PARENT_CALLBACK;
-  if (record?.parentCallback) env.PI_PERSONAL_PARENT_CALLBACK = JSON.stringify(record.parentCallback);
+  delete env.RETRIEVER_PARENT_CALLBACK;
+  if (record?.parentCallback) env.RETRIEVER_PARENT_CALLBACK = JSON.stringify(record.parentCallback);
   return env;
 }

@@ -42,7 +42,7 @@ async function launchConfig(): Promise<AppConfig> {
 
 async function main(): Promise<void> {
   const configPath = arg('--config');
-  if (configPath) process.env.PERSONAL_DAEMON_CONFIG = path.resolve(configPath);
+  if (configPath) process.env.RETRIEVER_CONFIG = path.resolve(configPath);
   const id = arg('--id');
   const runId = arg('--run-id');
   const promptFile = arg('--prompt-file');

@@ -1,7 +1,7 @@
 {
   "agent": {
     "sessionId": "personal-agent",
-    "cwd": "/tmp/pi-personal-daemon-workspace",
+    "cwd": "/tmp/retriever-workspace",
     "piBin": "pi",
     "extraArgs": ["--no-approve"],
     "mock": false
@@ -37,7 +37,7 @@
   },
   "sender": {
     "type": "mock",
-    "mockOutbox": "/tmp/pi-personal-daemon-workspace/pi-personal-daemon/outbox.jsonl"
+    "mockOutbox": "/tmp/retriever-workspace/retriever/outbox.jsonl"
   },
   "feishu": {
     "appId": "",
@@ -48,8 +48,8 @@
     "eventMode": "ws"
   },
   "runtime": {
-    "contextFile": "/tmp/pi-personal-daemon-current-context.json",
-    "stateDir": "/tmp/pi-personal-daemon-workspace/.cache/pi-personal-daemon"
+    "contextFile": "/tmp/retriever-current-context.json",
+    "stateDir": "/tmp/retriever-workspace/.cache/retriever"
   },
   "scheduler": {
     "enabled": true,
@@ -72,7 +72,7 @@
     ]
   },
   "runtimeCronExamples": [
-    "pi-personal-daemon cron create --id hourly-note --cron '0 * * * *' --prompt 'Hourly wakeup' --target main",
-    "pi-personal-daemon cron create --id one-shot --at '2026-10-21T09:30:00+08:00' --prompt 'One-shot wakeup' --target new"
+    "retriever cron create --id hourly-note --cron '0 * * * *' --prompt 'Hourly wakeup' --target main",
+    "retriever cron create --id one-shot --at '2026-10-21T09:30:00+08:00' --prompt 'One-shot wakeup' --target new"
   ]
 }

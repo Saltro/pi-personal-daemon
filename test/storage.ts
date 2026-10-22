@@ -59,7 +59,7 @@ if (worker) {
     // This worker runs with HOME pointing to a new temporary directory. Assert
     // the path before opening anything so a missing override cannot touch user state.
     assert.equal(config.runtime.stateDir, undefined);
-    assert.equal(stateDir(config), path.join(id, '.cache', 'pi-personal-daemon'));
+    assert.equal(stateDir(config), path.join(id, '.cache', 'retriever'));
     const imported = getSession(config, 'legacy-child');
     assert.equal(imported.autoReturn, true);
     assert.equal(imported.logPath, path.join(stateDir(config), 'sessions', 'legacy-child.log'));
@@ -76,7 +76,7 @@ if (worker) {
   }
   closeStateDb(config);
 } else {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-personal-storage-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'retriever-storage-'));
   const configs: AppConfig[] = [];
   const configFor = (name: string): AppConfig => {
     const root = path.join(tmp, name);
@@ -267,7 +267,7 @@ if (worker) {
     assert.equal(stateDbPath(contextOnly), path.join(defaultStateDir(), 'state.sqlite'));
 
     const tempHome = path.join(tmp, 'temporary-home');
-    const oldDefaultRoot = path.join(tempHome, '.cache', 'pi-personal-daemon');
+    const oldDefaultRoot = path.join(tempHome, '.cache', 'retriever');
     const homeParent = { ...parent, queuePath: path.join(oldDefaultRoot, 'session-callbacks', 'old-parent') };
     const homeSession = { ...legacySession, parentCallback: homeParent, logPath: path.join(oldDefaultRoot, 'sessions', 'legacy-child.log') };
     const homeContextPath = path.join(tempHome, 'custom-context.json');
