@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { MAIN_SESSION_ID } from '../../config.js';
 import {
   type AgentAdapter,
   type AgentProcess,
@@ -28,7 +29,7 @@ export function processPrompt(
   record: PersonalSessionRecord | undefined,
   prompt: string,
 ): AgentProcess {
-  const sessionId = record?.sessionId || config.agent.sessionId;
+  const sessionId = record?.sessionId || MAIN_SESSION_ID;
   const args = (profile.args || []).map((value) => value.replaceAll('{sessionId}', sessionId));
   if (profile.promptMode === 'argument') {
     let included = false;
@@ -76,7 +77,7 @@ class ProcessAgentRunner implements AgentRunner {
     const spec = processPrompt(this.config, this.profile, undefined, message);
     const task = new Promise<string>((resolve, reject) => {
       const child = spawn(spec.command, spec.args, {
-        cwd: this.profile.cwd || this.config.agent.cwd,
+        cwd: this.profile.cwd || this.config.workspaceDir,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: spec.env,
         detached: agentProcessDetached,

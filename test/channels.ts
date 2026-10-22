@@ -24,20 +24,11 @@ import type { AppConfig, OutboundReply } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-channels-'));
 const config: AppConfig = {
-  agent: { sessionId: 'main', cwd: tmp, piBin: 'pi', extraArgs: [], mock: true },
-  http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
-  stdin: { enabled: false },
+  workspaceDir: tmp,
+  agentProfiles: { default: { backend: 'mock' } },
+  extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
   sender: { type: 'mock', mockOutbox: path.join(tmp, 'outbox') },
-  feishu: {
-    appId: '',
-    appSecret: '',
-    verificationToken: '',
-    encryptKey: '',
-    baseUrl: 'https://open.feishu.cn',
-    eventMode: 'webhook',
-  },
-  scheduler: { enabled: false, wakeups: [] },
-  runtime: { stateDir: path.join(tmp, 'state') },
+  stateDir: path.join(tmp, 'state'),
 };
 assert.throws(
   () => createChannelAdapter({ ...config, channel: { type: 'missing' } }),
@@ -103,26 +94,26 @@ assert.equal(closed, true);
 await assert.rejects(daemon.enqueue(normalizeInbound('after stop')), /stopped/);
 assert.doesNotMatch(toAgentPrompt(normalizeInbound('plain text')), /Feishu|Pi session/);
 
-const stdioConfig: AppConfig = {
+const stdinConfig: AppConfig = {
   ...config,
-  channel: { type: 'stdio' },
-  runtime: { stateDir: path.join(tmp, 'stdio-state') },
+  channel: { type: 'stdin' },
+  stateDir: path.join(tmp, 'stdin-state'),
 };
-const stdioDaemon = new PersonalDaemon(stdioConfig);
-await stdioDaemon.enqueue(
+const stdinDaemon = new PersonalDaemon(stdinConfig);
+await stdinDaemon.enqueue(
   normalizeInbound(
-    { type: 'message', chatId: 'terminal-destination', text: 'stdio ingress' },
+    { type: 'message', chatId: 'terminal-destination', text: 'stdin ingress' },
     'stdin',
   ),
 );
-assert.equal(readFeishuChatBinding(stdioConfig)?.chatId, 'terminal-destination');
-assert.equal(readCurrentContext(stdioConfig).textChars, 'stdio ingress'.length);
-stdioDaemon.stop();
+assert.equal(readFeishuChatBinding(stdinConfig)?.chatId, 'terminal-destination');
+assert.equal(readCurrentContext(stdinConfig).textChars, 'stdin ingress'.length);
+stdinDaemon.stop();
 const file = path.join(tmp, 'config.json');
-fs.writeFileSync(file, JSON.stringify(stdioConfig));
+fs.writeFileSync(file, JSON.stringify(stdinConfig));
 const send = spawnSync(
   process.execPath,
-  [path.resolve(import.meta.dirname, '../dist/index.js'), 'send', 'stdio egress'],
+  [path.resolve(import.meta.dirname, '../dist/index.js'), 'send', 'stdin egress'],
   {
     cwd: tmp,
     env: { ...process.env, RETRIEVER_CONFIG: file },
@@ -131,10 +122,10 @@ const send = spawnSync(
   },
 );
 assert.equal(send.status, 0, send.stderr);
-assert.equal(send.stdout, 'stdio egress\n');
-assert.equal(readCurrentContext(stdioConfig).sendCount, 1);
+assert.equal(send.stdout, 'stdin egress\n');
+assert.equal(readCurrentContext(stdinConfig).sendCount, 1);
 
-const queuedConfig = { ...config, runtime: { stateDir: path.join(tmp, 'queued-state') } };
+const queuedConfig = { ...config, stateDir: path.join(tmp, 'queued-state') };
 const queuedPrompts: string[] = [];
 let active = false;
 let releaseFirst!: () => void;
@@ -188,7 +179,7 @@ assert.match(queuedPrompts[0], /first queued prompt/);
 assert.match(queuedPrompts[1], /second queued prompt/);
 queuedDaemon.stop();
 
-const callbackConfig = { ...config, runtime: { stateDir: path.join(tmp, 'callback-state') } };
+const callbackConfig = { ...config, stateDir: path.join(tmp, 'callback-state') };
 writeParentReturnNotification(
   callbackConfig,
   { sessionId: 'parent', cwd: tmp, queuePath: '', createdAt: new Date().toISOString() },
@@ -228,7 +219,7 @@ await assert.rejects(
 assert.equal(listParentNotifications(callbackConfig).length, 1);
 failingDaemon.stop();
 
-const backlogConfig = { ...config, runtime: { stateDir: path.join(tmp, 'backlog-state') } };
+const backlogConfig = { ...config, stateDir: path.join(tmp, 'backlog-state') };
 const parent = { sessionId: 'main', cwd: tmp, queuePath: '', createdAt: new Date().toISOString() };
 const backlogIds = [
   writeParentReturnNotification(backlogConfig, parent, 'slow callback'),

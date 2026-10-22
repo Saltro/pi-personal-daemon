@@ -14,20 +14,11 @@ import type { AppConfig } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-daemon-lifecycle-'));
 const config: AppConfig = {
-  agent: { sessionId: 'main', cwd: tmp, piBin: 'pi', extraArgs: [], mock: true },
-  http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
-  stdin: { enabled: false },
+  workspaceDir: tmp,
+  agentProfiles: { default: { backend: 'mock' } },
+  extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
   sender: { type: 'mock', mockOutbox: path.join(tmp, 'outbox') },
-  feishu: {
-    appId: '',
-    appSecret: '',
-    verificationToken: '',
-    encryptKey: '',
-    baseUrl: '',
-    eventMode: 'webhook',
-  },
-  scheduler: { enabled: false, wakeups: [] },
-  runtime: { stateDir: path.join(tmp, 'state') },
+  stateDir: path.join(tmp, 'state'),
 };
 
 assert.deepEqual(

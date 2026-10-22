@@ -4,7 +4,6 @@ import {
   unsupportedCapability,
 } from '../../core/agents/types.js';
 import type { MockAgentProfile } from '../../types.js';
-import { PiRpcRunner } from '../pi/runner.js';
 
 export function mockReply(profile: MockAgentProfile, prompt: string): string {
   return `${profile.replyPrefix ?? 'mock pi reply: '}${prompt.slice(0, 120)}`;
@@ -43,17 +42,8 @@ class MockAgentRunner implements AgentRunner {
 
 export const mockAdapter: AgentAdapter = {
   sessionCapabilities: { prompt: true, steer: false, history: false, contextUsage: false },
-  createMainRunner(config, profile) {
+  createMainRunner(_config, profile) {
     if (profile.backend !== 'mock') throw new Error('invalid mock agent profile');
-    // Legacy `agent.mock` mode keeps Pi's state/context shape while mocking completions.
-    if (
-      (!config.agent.profile || config.agent.profile === 'default') &&
-      !config.agentProfiles?.default
-    ) {
-      return Object.assign(new PiRpcRunner(config), {
-        capabilities: { prompt: true, steer: true, history: false, contextUsage: false },
-      });
-    }
     return new MockAgentRunner(profile);
   },
   sessionProcess(_config, profile, _record, prompt) {

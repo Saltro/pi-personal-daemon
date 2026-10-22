@@ -55,8 +55,10 @@ fs.writeFileSync(
   `const fs=require('node:fs');let prompt='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>prompt+=c);process.stdin.on('end',()=>{if(process.argv.includes('--print'))process.exit(42);console.log('START '+process.pid);setTimeout(()=>{console.log(JSON.stringify({prompt,pid:process.pid,config:process.env.RETRIEVER_CONFIG,path:process.env.PATH,session:process.env.RETRIEVER_SESSION_ID}));},1200);});`,
 );
 const config: AppConfig = {
-  agent: { sessionId: 'main', cwd: tmp, piBin: 'pi', extraArgs: [], mock: true },
+  workspaceDir: tmp,
+  extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
   agentProfiles: {
+    default: { backend: 'mock' },
     fast: { backend: 'mock', replyPrefix: 'saved-profile: ' },
     plain: { backend: 'process', command: process.execPath, args: [harness] },
     absent: { backend: 'process', command: path.join(tmp, 'missing-agent') },
@@ -74,19 +76,9 @@ const config: AppConfig = {
       args: ['-e', 'setInterval(() => {}, 1000)'],
     },
   },
-  http: { enabled: false, host: '127.0.0.1', port: 0, path: '/' },
-  stdin: { enabled: false },
   sender: { type: 'mock', mockOutbox: path.join(tmp, 'outbox') },
-  feishu: {
-    appId: '',
-    appSecret: '',
-    verificationToken: '',
-    encryptKey: '',
-    baseUrl: '',
-    eventMode: 'webhook',
-  },
-  scheduler: { enabled: false, wakeups: [] },
-  runtime: { stateDir: path.join(tmp, 'state'), configPath },
+  stateDir: path.join(tmp, 'state'),
+  configPath,
 };
 const returnHarness = path.join(tmp, 'return-harness.cjs');
 fs.writeFileSync(
@@ -106,9 +98,15 @@ for (const key of [
   'PI_SESSION_FILE',
   'RETRIEVER_SESSION_ID',
   'RETRIEVER_PARENT_CALLBACK',
-  'RETRIEVER_AGENT_PROFILE',
-  'RETRIEVER_AGENT_MOCK',
+  'RETRIEVER_WORKSPACE_DIR',
+  'RETRIEVER_CHANNEL',
+  'PI_BIN',
+  'RETRIEVER_PI_SESSION_DIR',
+  'RETRIEVER_PI_EXTRA_ARGS',
+  'RETRIEVER_PI_TIMEOUT_MS',
   'RETRIEVER_STATE_DIR',
+  'FEISHU_APP_ID',
+  'FEISHU_APP_SECRET',
 ])
   delete env[key];
 function command(args: string[], extraEnv: NodeJS.ProcessEnv = {}) {
@@ -333,7 +331,8 @@ try {
   assert.equal(loadRegistry(config).sessions['bad-profile'], undefined);
   const changedConfig = {
     ...config,
-    agent: { ...config.agent, mock: false },
+    workspaceDir: tmp,
+    extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
     agentProfiles: {
       ...config.agentProfiles,
       fast: { backend: 'process', command: '/changed/missing' },
@@ -574,14 +573,18 @@ try {
   await dispatchRuntimeCron(
     {
       ...config,
-      agent: { ...config.agent, mock: false },
+      workspaceDir: tmp,
+      extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
       agentProfiles: { fast: { backend: 'process', command: '/wrong' } },
     },
     fixedCron,
     async () => {},
   );
   assert.equal(getSession(config, 'named').lastResult, 'saved-profile: cron saved');
-  const defaultCronConfig = { ...config, agent: { ...config.agent, profile: 'fast' } };
+  const defaultCronConfig = {
+    ...config,
+    agentProfiles: { ...config.agentProfiles, default: config.agentProfiles!.fast },
+  };
   const freshCron = makeRuntimeCron({
     id: 'new-profile',
     prompt: 'cron new',
@@ -592,7 +595,7 @@ try {
   const fresh = Object.values(loadRegistry(config).sessions).find(
     (record) => record.name === 'cron:new-profile',
   )!;
-  assert.equal(fresh.agentProfile, 'fast');
+  assert.equal(fresh.agentProfile, 'default');
   assert.equal(fresh.lastResult, 'saved-profile: cron new');
 
   for (const [id, schedule] of [

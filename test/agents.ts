@@ -17,22 +17,17 @@ import {
 } from '../src/core/runtime/process-paths.js';
 import { newSessionRecord } from '../src/core/sessions/registry.js';
 import { selectSessionAgent } from '../src/core/sessions/service.js';
+import { PiRpcRunner } from '../src/extensions/pi/runner.js';
 import type { AppConfig, ProcessAgentProfile } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'retriever-agents-'));
 const originalConfigEnv = process.env.RETRIEVER_CONFIG;
 try {
   const config: AppConfig = {
-    agent: {
-      sessionId: 'main',
-      cwd: tmp,
-      piBin: '/global/pi',
-      extraArgs: ['--global'],
-      mock: true,
-    },
+    workspaceDir: tmp,
     agentProfiles: {
       fake: { backend: 'mock', replyPrefix: 'profile reply: ' },
-      pi: { backend: 'pi', piBin: '/profile/pi', extraArgs: ['--own'] },
+      pi: { backend: 'pi', bin: '/profile/pi', extraArgs: ['--own'] },
       text: {
         backend: 'process',
         command: process.execPath,
@@ -42,21 +37,15 @@ try {
         ],
       },
     },
-    http: { enabled: false, host: '127.0.0.1', port: 0, path: '/' },
-    stdin: { enabled: false },
     sender: { type: 'mock', mockOutbox: path.join(tmp, 'outbox') },
-    feishu: {
-      appId: '',
-      appSecret: '',
-      verificationToken: '',
-      encryptKey: '',
-      baseUrl: '',
-      eventMode: 'webhook',
+    extensions: {
+      pi: { bin: '/global/pi', extraArgs: ['--global'] },
+      feishu: { appId: '', appSecret: '' },
     },
-    scheduler: { enabled: false, wakeups: [] },
-    runtime: { stateDir: path.join(tmp, 'state'), configPath: path.join(tmp, 'config.json') },
+    stateDir: path.join(tmp, 'state'),
+    configPath: path.join(tmp, 'config.json'),
   };
-  assert.equal(resolveAgentProfile(config).profile.backend, 'mock');
+  assert.equal(resolveAgentProfile(config).profile.backend, 'pi');
   assert.equal(resolveAgentProfile(config, 'pi').profile.backend, 'pi');
   assert.throws(() => resolveAgentProfile(config, 'missing'), /profile not found/);
   assert.throws(
@@ -67,7 +56,8 @@ try {
       ),
     /unsupported agent backend/,
   );
-  const legacyMain = createMainAgentRunner(config);
+  // Pi's RPC runner keeps a mock mode for tests; user config never reaches it.
+  const legacyMain = new PiRpcRunner(config, { mock: true });
   assert.equal(await legacyMain.promptAndWait('legacy'), 'mock pi reply: legacy');
   assert.deepEqual(await legacyMain.getContextUsage(), {
     text: 'Context usage unavailable',
@@ -77,7 +67,7 @@ try {
 
   const namedMain = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'fake' },
+    agentProfiles: { default: { backend: 'mock', replyPrefix: 'profile reply: ' } },
   });
   assert.equal(await namedMain.promptAndWait('named'), 'profile reply: named');
   assert.equal(namedMain.capabilities.contextUsage, false);
@@ -91,7 +81,7 @@ try {
     'pi',
   );
   config.agentProfiles!.pi = { backend: 'mock', replyPrefix: 'changed' };
-  config.agent.piBin = '/changed/global';
+  config.extensions.pi.bin = '/changed/global';
   const spec = sessionAgentProcess(config, record, 'prompt');
   assert.notEqual(typeof spec, 'string');
   if (typeof spec !== 'string') {
@@ -109,7 +99,7 @@ try {
 
   const processMain = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'text' },
+    agentProfiles: { ...config.agentProfiles, default: config.agentProfiles!.text },
   });
   assert.deepEqual(processMain.capabilities, {
     prompt: true,
@@ -137,8 +127,7 @@ try {
   };
   const timeoutRunner = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'hang' },
-    agentProfiles: { hang: hangingProfile },
+    agentProfiles: { default: hangingProfile },
   });
   const timeoutStart = Date.now();
   await assert.rejects(timeoutRunner.promptAndWait('hang'), /timed out/);
@@ -152,8 +141,7 @@ try {
   timeoutRunner.close();
   const closeRunner = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'hang' },
-    agentProfiles: { hang: { ...hangingProfile, timeoutMs: 1000 } },
+    agentProfiles: { default: { ...hangingProfile, timeoutMs: 1000 } },
   });
   const closing = closeRunner.promptAndWait('close');
   const rejectsClose = assert.rejects(closing, /runner closed/);
@@ -163,9 +151,8 @@ try {
 
   const stdinRunner = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'broken-stdin' },
     agentProfiles: {
-      'broken-stdin': {
+      default: {
         backend: 'process',
         command: process.execPath,
         args: ['-e', 'require("node:fs").closeSync(0);setInterval(()=>{},1000)'],
@@ -191,9 +178,8 @@ try {
     ];
     const treeRunner = createMainAgentRunner({
       ...config,
-      agent: { ...config.agent, profile: 'tree' },
       agentProfiles: {
-        tree: { backend: 'process', command: process.execPath, args: treeArgs, timeoutMs: 200 },
+        default: { backend: 'process', command: process.execPath, args: treeArgs, timeoutMs: 200 },
       },
     });
     try {
@@ -214,9 +200,8 @@ try {
       );
       const exitRunner = createMainAgentRunner({
         ...config,
-        agent: { ...config.agent, profile: 'exit-tree' },
         agentProfiles: {
-          'exit-tree': {
+          default: {
             backend: 'process',
             command: process.execPath,
             args: [
@@ -244,9 +229,8 @@ try {
   }
   const unicodeRunner = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'unicode' },
     agentProfiles: {
-      unicode: {
+      default: {
         backend: 'process',
         command: process.execPath,
         args: [
@@ -264,20 +248,18 @@ try {
     cwd: path.join(tmp, 'old-cwd'),
     sessionDir: path.join(tmp, 'old-sessions'),
   };
-  const legacyConfig = {
+  const legacyConfig: AppConfig = {
     ...config,
-    agent: {
-      ...config.agent,
-      profile: 'new-main',
-      mock: false,
-      piBin: '/legacy/pi',
-      extraArgs: ['--legacy'],
+    extensions: {
+      ...config.extensions,
+      pi: { bin: '/legacy/pi', extraArgs: ['--legacy'] },
     },
     agentProfiles: {
       default: { backend: 'process', command: '/wrong-default' } as ProcessAgentProfile,
       'new-main': { backend: 'process', command: '/wrong-main' } as ProcessAgentProfile,
     },
   };
+  // Imported sessions keep the recorded workspace and ignore the current default profile.
   const legacySpec = sessionAgentProcess(legacyConfig, legacyRecord, 'old history');
   if (typeof legacySpec === 'string') throw new Error('legacy Pi record incorrectly selected mock');
   assert.equal(legacySpec.command, '/legacy/pi');
@@ -291,14 +273,6 @@ try {
     'old history',
     '--legacy',
   ]);
-  assert.equal(
-    sessionAgentProcess(
-      { ...legacyConfig, agent: { ...legacyConfig.agent, mock: true } },
-      legacyRecord,
-      'legacy mock',
-    ),
-    'mock pi reply: legacy mock',
-  );
 
   const fakePi = path.join(tmp, 'silent-pi');
   fs.writeFileSync(
@@ -308,8 +282,7 @@ try {
   );
   const piDeadlineRunner = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'deadline' },
-    agentProfiles: { deadline: { backend: 'pi', piBin: fakePi, commandTimeoutMs: 40 } },
+    agentProfiles: { default: { backend: 'pi', bin: fakePi, timeoutMs: 40 } },
   });
   const piStart = Date.now();
   await assert.rejects(piDeadlineRunner.getState(), /timed out|timeout/);
@@ -339,9 +312,8 @@ try {
 
   const missingRunner = createMainAgentRunner({
     ...config,
-    agent: { ...config.agent, profile: 'missing-exec' },
     agentProfiles: {
-      'missing-exec': { backend: 'process', command: path.join(tmp, 'does-not-exist') },
+      default: { backend: 'process', command: path.join(tmp, 'does-not-exist') },
     },
   });
   await assert.rejects(missingRunner.promptAndWait('no real calls'), /startup failed/);
@@ -353,16 +325,16 @@ try {
     configPath,
     JSON.stringify({
       ...config,
-      agent: { ...config.agent, cwd: './work' },
-      channel: { type: 'mock' },
-      runtime: { stateDir: './state' },
+      workspaceDir: './work',
+      channel: { type: 'stdin' },
+      stateDir: './state',
     }),
   );
   process.env.RETRIEVER_CONFIG = configPath;
   const loaded = loadConfig();
-  assert.equal(loaded.channel?.type, 'mock');
-  assert.equal(loaded.agent.cwd, path.join(tmp, 'work'));
-  assert.equal(loaded.runtime.stateDir, path.join(tmp, 'state'));
+  assert.equal(loaded.channel?.type, 'stdin');
+  assert.equal(loaded.workspaceDir, path.join(tmp, 'work'));
+  assert.equal(loaded.stateDir, path.join(tmp, 'state'));
   assert.equal(absoluteConfigPath(loaded), configPath);
   assert.equal(agentProcessEnv(loaded).RETRIEVER_CONFIG, configPath);
   assert.ok(path.isAbsolute(helperBinDirectory()));

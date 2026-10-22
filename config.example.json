@@ -1,78 +1,19 @@
 {
-  "agent": {
-    "sessionId": "personal-agent",
-    "cwd": "/tmp/retriever-workspace",
-    "piBin": "pi",
-    "extraArgs": ["--no-approve"],
-    "mock": false
-  },
+  "workspaceDir": "/path/to/workspace",
   "channel": {
     "type": "feishu"
   },
-  "agentProfiles": {
-    "research": {
-      "backend": "pi",
-      "piBin": "pi",
-      "extraArgs": [],
-      "commandTimeoutMs": 30000,
-      "cwd": "/path/to/research-workspace"
+  "extensions": {
+    "pi": {
+      "bin": "pi",
+      "extraArgs": ["--no-approve"],
+      "sessionDir": "/path/to/pi-sessions",
+      "timeoutMs": 600000
     },
-    "local-cli": {
-      "backend": "process",
-      "command": "/path/to/agent-cli",
-      "args": [],
-      "promptMode": "stdin",
-      "timeoutMs": 600000,
-      "cwd": "/path/to/workspace"
+    "feishu": {
+      "appId": "",
+      "appSecret": ""
     }
   },
-  "http": {
-    "enabled": true,
-    "host": "127.0.0.1",
-    "port": 8787,
-    "path": "/feishu/webhook"
-  },
-  "stdin": {
-    "enabled": true
-  },
-  "sender": {
-    "type": "mock",
-    "mockOutbox": "/tmp/retriever-workspace/retriever/outbox.jsonl"
-  },
-  "feishu": {
-    "appId": "",
-    "appSecret": "",
-    "verificationToken": "",
-    "encryptKey": "",
-    "baseUrl": "https://open.feishu.cn",
-    "eventMode": "ws"
-  },
-  "runtime": {
-    "contextFile": "/tmp/retriever-current-context.json",
-    "stateDir": "/tmp/retriever-workspace/.cache/retriever"
-  },
-  "scheduler": {
-    "enabled": true,
-    "wakeups": [
-      {
-        "id": "hourly-note",
-        "cron": "0 * * * *",
-        "prompt": "Active wakeup: briefly inspect context and decide whether to send a short personal note."
-      },
-      {
-        "id": "morning-check",
-        "cron": "30 9 * * *",
-        "prompt": "Morning wakeup: review memory and decide whether a short Feishu note would be useful."
-      },
-      {
-        "id": "dev-fast-loop",
-        "intervalMs": 3600000,
-        "prompt": "Development interval wakeup: verify the scheduler path."
-      }
-    ]
-  },
-  "runtimeCronExamples": [
-    "retriever cron create --id hourly-note --cron '0 * * * *' --prompt 'Hourly wakeup' --target main",
-    "retriever cron create --id one-shot --at '2026-10-21T09:30:00+08:00' --prompt 'One-shot wakeup' --target new"
-  ]
+  "stateDir": "/path/to/state"
 }

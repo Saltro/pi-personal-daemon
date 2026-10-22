@@ -95,15 +95,13 @@ if (worker) {
   } else if (action === 'default-import') {
     // This worker runs with HOME pointing to a new temporary directory. Assert
     // the path before opening anything so a missing override cannot touch user state.
-    assert.equal(config.runtime.stateDir, undefined);
-    assert.equal(stateDir(config), path.join(id, '.cache', 'retriever'));
+    assert.equal(config.stateDir, undefined);
+    assert.equal(stateDir(config), path.join(id, '.local', 'state', 'retriever'));
     const imported = getSession(config, 'legacy-child');
     assert.equal(imported.autoReturn, true);
     assert.equal(imported.logPath, path.join(stateDir(config), 'sessions', 'legacy-child.log'));
     assert.equal(getCron(config, 'legacy-cron').prompt, 'wake');
     assert.equal(readFeishuChatBinding(config)?.chatId, 'visible-fixed');
-    assert.equal(readCurrentContext(config).eventId, 'legacy-event');
-    assert.equal(readCurrentContext(config).sendCount, 7);
     assert.equal(listParentNotifications(config)[0].id, 'legacy-notice');
     const notice = claimParentNotifications(config)[0];
     acknowledgeParentNotification(config, notice.id);
@@ -123,23 +121,10 @@ if (worker) {
     const root = path.join(tmp, name);
     fs.mkdirSync(root, { recursive: true });
     const config: AppConfig = {
-      agent: { sessionId: 'main', cwd: root, piBin: 'pi', extraArgs: [], mock: true },
-      http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
-      stdin: { enabled: false },
+      workspaceDir: root,
+      extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
       sender: { type: 'mock', mockOutbox: path.join(root, 'outbox.jsonl') },
-      feishu: {
-        appId: '',
-        appSecret: '',
-        verificationToken: '',
-        encryptKey: '',
-        baseUrl: 'https://open.feishu.cn',
-        eventMode: 'webhook',
-      },
-      scheduler: { enabled: false, wakeups: [] },
-      runtime: {
-        stateDir: path.join(root, 'state'),
-        contextFile: path.join(root, 'legacy-context.json'),
-      },
+      stateDir: path.join(root, 'state'),
     };
     configs.push(config);
     return config;
@@ -187,7 +172,6 @@ if (worker) {
       path.join(stateDir(legacy), 'sessions', 'registry.json'),
       path.join(stateDir(legacy), 'cron', 'registry.json'),
       path.join(stateDir(legacy), 'feishu-chat-binding.json'),
-      legacy.runtime.contextFile!,
       path.join(parent.queuePath, 'notice.json'),
     ];
     writeJson(sourceFiles[0], { sessions: { 'legacy-child': legacySession } });
@@ -198,17 +182,7 @@ if (worker) {
       updatedAt: now,
       source: 'legacy',
     });
-    writeJson(sourceFiles[3], {
-      chatId: 'inbound',
-      eventId: 'legacy-event',
-      source: 'test',
-      kind: 'message',
-      textChars: 3,
-      startedAt: now,
-      sendCount: 7,
-      contextUsage: 'legacy usage',
-    });
-    writeJson(sourceFiles[4], legacyNotice);
+    writeJson(sourceFiles[3], legacyNotice);
     fs.writeFileSync(legacySession.logPath, 'native session log retained');
     const original = sourceFiles.map((file) => fs.readFileSync(file, 'utf8'));
     assert.equal(getSession(legacy, 'legacy-child').autoReturn, true);
@@ -220,8 +194,6 @@ if (worker) {
     assert.equal('callback' in getSession(legacy, 'legacy-child'), false);
     assert.equal(getCron(legacy, 'legacy-cron').prompt, 'wake');
     assert.equal(readFeishuChatBinding(legacy)?.chatId, 'visible-fixed');
-    assert.equal(readCurrentContext(legacy).sendCount, 7);
-    assert.equal(readCurrentContext(legacy).contextUsage, 'legacy usage');
     assert.deepEqual(listParentNotifications(legacy), [legacyNotice]);
     assert.equal(getStateDb(legacy).prepare('PRAGMA user_version').get()?.user_version, 3);
     const freshColumns = getStateDb(legacy)
@@ -286,7 +258,7 @@ if (worker) {
           .run(
             migratedIds[value],
             migratedIds[value],
-            migration.agent.cwd,
+            migration.workspaceDir,
             'completed',
             value,
             JSON.stringify(migrationParent),
@@ -484,15 +456,12 @@ if (worker) {
     );
 
     // Pure path assertions only: never open the actual default cache in this process.
-    const contextOnly: AppConfig = {
-      ...legacy,
-      runtime: { contextFile: legacy.runtime.contextFile },
-    };
+    const contextOnly: AppConfig = { ...legacy, stateDir: undefined };
     assert.equal(stateDir(contextOnly), defaultStateDir());
     assert.equal(stateDbPath(contextOnly), path.join(defaultStateDir(), 'state.sqlite'));
 
     const tempHome = path.join(tmp, 'temporary-home');
-    const oldDefaultRoot = path.join(tempHome, '.cache', 'retriever');
+    const oldDefaultRoot = path.join(tempHome, '.local', 'state', 'retriever');
     const homeParent = {
       ...parent,
       queuePath: path.join(oldDefaultRoot, 'session-callbacks', 'old-parent'),
@@ -502,41 +471,28 @@ if (worker) {
       parentCallback: homeParent,
       logPath: path.join(oldDefaultRoot, 'sessions', 'legacy-child.log'),
     };
-    const homeContextPath = path.join(tempHome, 'custom-context.json');
     const homeSources = [
       path.join(oldDefaultRoot, 'sessions', 'registry.json'),
       path.join(oldDefaultRoot, 'cron', 'registry.json'),
       path.join(oldDefaultRoot, 'feishu-chat-binding.json'),
-      homeContextPath,
       path.join(homeParent.queuePath, 'notice.json'),
     ];
     writeJson(homeSources[0], { sessions: { 'legacy-child': homeSession } });
     writeJson(homeSources[1], { version: 1, crons: { 'legacy-cron': legacyCron } });
     writeJson(homeSources[2], { chatId: 'visible-fixed', createdAt: now, updatedAt: now });
-    writeJson(homeSources[3], {
-      chatId: 'inbound',
-      eventId: 'legacy-event',
-      source: 'test',
-      kind: 'message',
-      textChars: 3,
-      startedAt: now,
-      sendCount: 7,
-    });
-    writeJson(homeSources[4], { ...legacyNotice, parent: homeParent });
+    writeJson(homeSources[3], { ...legacyNotice, parent: homeParent });
     const homeOriginals = homeSources.map((file) => fs.readFileSync(file, 'utf8'));
-    const homeConfig: AppConfig = { ...legacy, runtime: { contextFile: homeContextPath } };
+    const homeConfig: AppConfig = { ...legacy, stateDir: undefined };
     assert.equal(
-      await runWorker('default-import', homeConfig, tempHome, { HOME: tempHome }),
+      await runWorker('default-import', homeConfig, tempHome, {
+        HOME: tempHome,
+        XDG_STATE_HOME: '',
+      }),
       'default-import-ok',
     );
     for (let i = 0; i < homeSources.length; i++)
       assert.equal(fs.readFileSync(homeSources[i], 'utf8'), homeOriginals[i]);
     assert.ok(fs.existsSync(path.join(oldDefaultRoot, 'state.sqlite')));
-    assert.equal(
-      fs.existsSync(`${homeContextPath}.state`),
-      false,
-      'contextFile must not silently relocate companion state',
-    );
 
     const isolatedA = configFor('isolated-a');
     const isolatedB = configFor('isolated-b');
@@ -544,7 +500,6 @@ if (worker) {
     writeCurrentContext(isolatedA, event);
     assert.throws(() => readCurrentContext(isolatedB), /current message context not found/);
     const stateOnly = configFor('state-only');
-    stateOnly.runtime = { stateDir: stateOnly.runtime.stateDir };
     assert.throws(() => readCurrentContext(stateOnly), /current message context not found/);
 
     const context = configFor('context');
@@ -1047,7 +1002,7 @@ async function testOrphanedGroup(config: AppConfig): Promise<void> {
     setInterval(() => {}, 1000);
   `,
     ],
-    { detached: true, cwd: config.agent.cwd, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
+    { detached: true, cwd: config.workspaceDir, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
   );
   try {
     await new Promise<void>((resolve, reject) => {

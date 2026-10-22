@@ -2,8 +2,6 @@ import type { AppConfig, InboundEvent, RuntimeContext } from '../../types.js';
 import { contextFields, decodeStateRow, getStateDb } from './db.js';
 import { stateDbPath } from './paths.js';
 
-export { contextFile, defaultContextFile } from './paths.js';
-
 export function writeCurrentContext(config: AppConfig, event: InboundEvent): RuntimeContext {
   const context: RuntimeContext = {
     chatId: event.chatId,

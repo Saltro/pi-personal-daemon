@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MAIN_SESSION_ID, resolveConfigPath } from '../../config.js';
 import type { AppConfig } from '../../types.js';
 import type { PersonalSessionRecord } from '../sessions/registry.js';
 
@@ -67,7 +68,7 @@ export function selfCommand(args: string[]): { command: string; args: string[] }
 }
 
 export function absoluteConfigPath(config: AppConfig): string {
-  return path.resolve(config.runtime.configPath || process.env.RETRIEVER_CONFIG || 'config.json');
+  return path.resolve(config.configPath || resolveConfigPath());
 }
 
 export function agentProcessEnv(
@@ -80,8 +81,8 @@ export function agentProcessEnv(
     ...extra,
     RETRIEVER_CONFIG: absoluteConfigPath(config),
     PATH: `${helperBinDirectory()}${path.delimiter}${extra.PATH ?? process.env.PATH ?? ''}`,
-    RETRIEVER_SESSION_ID: record?.id || config.agent.sessionId,
-    PI_SESSION_ID: record?.sessionId || config.agent.sessionId,
+    RETRIEVER_SESSION_ID: record?.id || MAIN_SESSION_ID,
+    PI_SESSION_ID: record?.sessionId || MAIN_SESSION_ID,
   };
   // Do not leak an enclosing child session's callback into an unrelated execution.
   delete env.RETRIEVER_PARENT_CALLBACK;

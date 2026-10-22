@@ -57,26 +57,9 @@ class FakePi extends EventEmitter {
 
 function config(): AppConfig {
   return {
-    agent: {
-      sessionId: 'runner-test',
-      cwd: process.cwd(),
-      piBin: 'fake-pi',
-      extraArgs: [],
-      mock: false,
-    },
-    http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
-    stdin: { enabled: false },
+    workspaceDir: process.cwd(),
+    extensions: { pi: { bin: 'fake-pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
     sender: { type: 'mock', mockOutbox: '' },
-    feishu: {
-      appId: '',
-      appSecret: '',
-      verificationToken: '',
-      encryptKey: '',
-      baseUrl: '',
-      eventMode: 'webhook',
-    },
-    scheduler: { enabled: false, wakeups: [] },
-    runtime: {},
   };
 }
 
@@ -180,7 +163,7 @@ await test('spawn error rejects commands without an unhandled child error', asyn
 
 await test('a real missing executable is handled without invoking Pi', async () => {
   const appConfig = config();
-  appConfig.agent.piBin = `/nonexistent-pi-runner-test-${process.pid}`;
+  appConfig.extensions.pi.bin = `/nonexistent-pi-runner-test-${process.pid}`;
   const runner = new PiRpcRunner(appConfig, { commandTimeoutMs: 1000 });
   try {
     await assert.rejects(runner.getState(), /ENOENT/);
@@ -529,7 +512,7 @@ for (const mode of ['timeout', 'leader-exit', 'ignored-pipes'] as const) {
     );
     fs.chmodSync(executable, 0o755);
     const appConfig = config();
-    appConfig.agent.piBin = executable;
+    appConfig.extensions.pi.bin = executable;
     const children: ChildProcessWithoutNullStreams[] = [];
     const runner = new PiRpcRunner(appConfig, {
       // Bounds the startup handshake only; the timeout mode still rejects on settle.
@@ -604,9 +587,8 @@ async function waitForReset(runner: PiRpcRunner): Promise<void> {
 }
 
 await test('mock methods do not spawn or schedule execution timers', async () => {
-  const appConfig = config();
-  appConfig.agent.mock = true;
-  const runner = new PiRpcRunner(appConfig, {
+  const runner = new PiRpcRunner(config(), {
+    mock: true,
     spawn: () => {
       throw new Error('must not spawn');
     },

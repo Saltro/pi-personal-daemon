@@ -37,7 +37,7 @@ async function launchConfig(): Promise<AppConfig> {
       if (!value || typeof value !== 'object') return;
       const message = value as { type?: string; config?: AppConfig };
       if (message.type !== 'launch') return;
-      if (!message.config?.agent || !message.config.runtime)
+      if (!message.config?.workspaceDir || !message.config.extensions)
         done(new Error('session watcher launch config missing'));
       else done(undefined, message.config);
     };

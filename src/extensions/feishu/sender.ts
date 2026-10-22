@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AppConfig, FeishuConfig, OutboundReply, Sender, SenderConfig } from '../../types.js';
+import type {
+  AppConfig,
+  FeishuExtensionConfig,
+  OutboundReply,
+  Sender,
+  SenderConfig,
+} from '../../types.js';
 
 interface TenantTokenResponse {
   code?: number;
@@ -56,7 +62,7 @@ export class FeishuSender implements Sender {
   private token: string | null = null;
   private tokenExpiresAt = 0;
 
-  constructor(private config: FeishuConfig) {}
+  constructor(private config: FeishuExtensionConfig) {}
 
   async send(reply: OutboundReply): Promise<FeishuApiResponse> {
     return this.withTokenRetry(() => this.sendWithToken(reply));
@@ -157,7 +163,7 @@ export class FeishuSender implements Sender {
   }
 
   private baseUrl(): string {
-    return (this.config.baseUrl || 'https://open.feishu.cn').replace(/\/$/, '');
+    return 'https://open.feishu.cn';
   }
 }
 
@@ -190,6 +196,6 @@ function escapeLarkMd(text: string): string {
 }
 
 export function createSender(config: AppConfig): Sender {
-  if (config.sender.type === 'feishu') return new FeishuSender(config.feishu);
-  return new MockSender(config.sender);
+  if (config.sender?.type === 'mock') return new MockSender(config.sender);
+  return new FeishuSender(config.extensions.feishu);
 }

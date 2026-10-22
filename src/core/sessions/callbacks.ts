@@ -55,7 +55,7 @@ export function detectParentCallback(config: AppConfig): ParentCallback | undefi
     sessionId: parentSessionId,
     sessionFile,
     cwd: process.cwd(),
-    sessionDir: config.agent.sessionDir,
+    sessionDir: config.extensions.pi.sessionDir,
     queuePath: callbackQueuePath(config, parentSessionId),
     createdAt: new Date().toISOString(),
   };

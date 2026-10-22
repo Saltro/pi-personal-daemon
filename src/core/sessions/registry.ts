@@ -255,8 +255,8 @@ export function newSessionRecord(
   return {
     id: fields.id,
     sessionId: fields.id,
-    cwd: fields.cwd || config.agent.cwd || process.cwd(),
-    sessionDir: config.agent.sessionDir,
+    cwd: fields.cwd || config.workspaceDir,
+    sessionDir: config.extensions.pi.sessionDir,
     name: fields.name,
     status: 'idle',
     agentProfile: fields.agentProfile,

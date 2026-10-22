@@ -23,35 +23,36 @@ export function resolveAgentProfile(
   config: AppConfig,
   requested?: string,
 ): { name: string; profile: AgentProfile } {
-  const name = requested ?? config.agent.profile ?? 'default';
+  const name = requested ?? 'default';
   if (!name.trim()) throw new Error('agent profile name must not be empty');
   let profile = config.agentProfiles?.[name];
   if (!profile) {
     if (name !== 'default') throw new Error(`agent profile not found: ${name}`);
-    profile = config.agent.mock
-      ? { backend: 'mock', cwd: config.agent.cwd, sessionDir: config.agent.sessionDir }
-      : {
-          backend: 'pi',
-          cwd: config.agent.cwd,
-          sessionDir: config.agent.sessionDir,
-          piBin: config.agent.piBin,
-          extraArgs: config.agent.extraArgs,
-          commandTimeoutMs: config.agent.commandTimeoutMs,
-        };
+    profile = defaultAgentProfile(config);
   }
   return { name, profile: snapshotAgentProfile(config, profile) };
+}
+
+function defaultAgentProfile(config: AppConfig): AgentProfile {
+  const pi = config.extensions.pi;
+  return {
+    backend: 'pi',
+    cwd: config.workspaceDir,
+    sessionDir: pi.sessionDir,
+    bin: pi.bin,
+    extraArgs: pi.extraArgs,
+    timeoutMs: pi.timeoutMs,
+  };
 }
 
 export function snapshotAgentProfile(config: AppConfig, profile: AgentProfile): AgentProfile {
   if (!profile || !adapters.has(profile.backend))
     throw new Error(`unsupported agent backend: ${profile?.backend}`);
-  const baseDir = config.runtime.configPath
-    ? path.dirname(config.runtime.configPath)
-    : process.cwd();
-  const cwd = path.resolve(baseDir, profile.cwd || config.agent.cwd);
+  const baseDir = config.configPath ? path.dirname(config.configPath) : config.workspaceDir;
+  const cwd = path.resolve(baseDir, profile.cwd || config.workspaceDir);
   const sessionDir = profile.sessionDir ? path.resolve(baseDir, profile.sessionDir) : undefined;
   if (profile.backend === 'pi') {
-    const piBin = profile.piBin || 'pi';
+    const bin = profile.bin || config.extensions.pi.bin;
     if (
       profile.extraArgs &&
       (!Array.isArray(profile.extraArgs) ||
@@ -59,17 +60,17 @@ export function snapshotAgentProfile(config: AppConfig, profile: AgentProfile): 
     )
       throw new Error('Pi agent extraArgs must be strings');
     if (
-      profile.commandTimeoutMs !== undefined &&
-      (!Number.isFinite(profile.commandTimeoutMs) ||
-        profile.commandTimeoutMs <= 0 ||
-        profile.commandTimeoutMs > 2_147_483_647)
+      profile.timeoutMs !== undefined &&
+      (!Number.isFinite(profile.timeoutMs) ||
+        profile.timeoutMs <= 0 ||
+        profile.timeoutMs > 2_147_483_647)
     )
-      throw new Error('Pi commandTimeoutMs must be between 1 and 2147483647');
+      throw new Error('Pi timeoutMs must be between 1 and 2147483647');
     return {
       ...profile,
       cwd,
       sessionDir,
-      piBin: piBin.includes(path.sep) ? path.resolve(baseDir, piBin) : piBin,
+      bin: bin.includes(path.sep) ? path.resolve(baseDir, bin) : bin,
       extraArgs: [...(profile.extraArgs || [])],
     };
   }
@@ -115,18 +116,12 @@ export function sessionAgentProfile(
       profile: snapshotAgentProfile(config, record.agentProfileSnapshot),
     };
   if (record.agentProfile) return resolveAgentProfile(config, record.agentProfile);
-  // Imported sessions predate named profiles: retain their legacy Pi/mock backend,
-  // even when the current main or named default now selects another harness.
-  const profile: AgentProfile = config.agent.mock
-    ? { backend: 'mock', cwd: record.cwd, sessionDir: record.sessionDir }
-    : {
-        backend: 'pi',
-        cwd: record.cwd,
-        sessionDir: record.sessionDir,
-        piBin: config.agent.piBin,
-        extraArgs: config.agent.extraArgs,
-        commandTimeoutMs: config.agent.commandTimeoutMs,
-      };
+  // Imported sessions predate named profiles: retain their recorded workspace.
+  const profile: AgentProfile = {
+    ...defaultAgentProfile(config),
+    cwd: record.cwd,
+    sessionDir: record.sessionDir,
+  };
   return { name: 'legacy', profile: snapshotAgentProfile(config, profile) };
 }
 

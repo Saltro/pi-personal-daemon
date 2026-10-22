@@ -1,43 +1,28 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { AppConfig } from './types.js';
 
+/** The single main session identity; not user-configurable. */
+export const MAIN_SESSION_ID = 'personal-agent';
+
 const DEFAULT_CONFIG: AppConfig = {
-  agent: {
-    sessionId: 'personal-agent',
-    cwd: process.cwd(),
-    piBin: 'pi',
-    extraArgs: [],
-    mock: false,
-  },
+  workspaceDir: process.cwd(),
   channel: { type: 'feishu' },
-  http: {
-    enabled: true,
-    host: '127.0.0.1',
-    port: 8787,
-    path: '/feishu/webhook',
+  extensions: {
+    pi: { bin: 'pi', extraArgs: [] },
+    feishu: { appId: '', appSecret: '' },
   },
-  stdin: {
-    enabled: true,
-  },
-  sender: {
-    type: 'mock',
-    mockOutbox: path.join(process.cwd(), 'outbox.jsonl'),
-  },
-  feishu: {
-    appId: '',
-    appSecret: '',
-    verificationToken: '',
-    encryptKey: '',
-    baseUrl: 'https://open.feishu.cn',
-    eventMode: 'ws',
-  },
-  scheduler: {
-    enabled: false,
-    wakeups: [],
-  },
-  runtime: {},
 };
+
+export function defaultConfigPath(): string {
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(base, 'retriever', 'config.json');
+}
+
+export function resolveConfigPath(): string {
+  return path.resolve(process.env.RETRIEVER_CONFIG || defaultConfigPath());
+}
 
 function mergeConfig<T>(base: T, override: Partial<T>): T {
   const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
@@ -52,68 +37,34 @@ function mergeConfig<T>(base: T, override: Partial<T>): T {
   return out as T;
 }
 
-function boolEnv(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined) return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
-}
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
 export function loadConfig(): AppConfig {
-  const configPath = path.resolve(
-    process.env.RETRIEVER_CONFIG || path.join(process.cwd(), 'config.json'),
-  );
+  const configPath = resolveConfigPath();
   let fileConfig: Partial<AppConfig> = {};
   if (fs.existsSync(configPath)) {
     fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Partial<AppConfig>;
   }
 
-  const envConfig = {
-    agent: {
-      sessionId: process.env.RETRIEVER_AGENT_SESSION_ID,
-      cwd: process.env.RETRIEVER_AGENT_CWD,
-      piBin: process.env.PI_BIN,
-      sessionDir: process.env.RETRIEVER_AGENT_SESSION_DIR,
-      extraArgs: process.env.RETRIEVER_AGENT_EXTRA_ARGS
-        ? process.env.RETRIEVER_AGENT_EXTRA_ARGS.split(' ').filter(Boolean)
-        : undefined,
-      mock: process.env.RETRIEVER_AGENT_MOCK
-        ? boolEnv(process.env.RETRIEVER_AGENT_MOCK, false)
-        : undefined,
-      profile: process.env.RETRIEVER_AGENT_PROFILE,
-    },
-    channel: { type: process.env.RETRIEVER_CHANNEL },
-    http: {
-      enabled: process.env.RETRIEVER_HTTP_ENABLED
-        ? boolEnv(process.env.RETRIEVER_HTTP_ENABLED, true)
-        : undefined,
-      host: process.env.RETRIEVER_HTTP_HOST,
-      port: process.env.RETRIEVER_HTTP_PORT ? Number(process.env.RETRIEVER_HTTP_PORT) : undefined,
-      path: process.env.RETRIEVER_HTTP_PATH,
-    },
-    stdin: {
-      enabled: process.env.RETRIEVER_STDIN_ENABLED
-        ? boolEnv(process.env.RETRIEVER_STDIN_ENABLED, true)
-        : undefined,
-    },
-    sender: {
-      type: process.env.RETRIEVER_SENDER,
-      mockOutbox: process.env.RETRIEVER_MOCK_OUTBOX,
-    },
-    feishu: {
-      appId: process.env.FEISHU_APP_ID,
-      appSecret: process.env.FEISHU_APP_SECRET,
-      verificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
-      encryptKey: process.env.FEISHU_ENCRYPT_KEY,
-      baseUrl: process.env.FEISHU_BASE_URL,
-      eventMode: process.env.FEISHU_EVENT_MODE as 'ws' | 'webhook' | 'both' | undefined,
-    },
-    scheduler: {
-      enabled: process.env.RETRIEVER_SCHEDULER_ENABLED
-        ? boolEnv(process.env.RETRIEVER_SCHEDULER_ENABLED, false)
-        : undefined,
-    },
-    runtime: {
-      contextFile: process.env.RETRIEVER_CONTEXT_FILE,
-      stateDir: process.env.RETRIEVER_STATE_DIR,
+  const envConfig: DeepPartial<AppConfig> = {
+    workspaceDir: process.env.RETRIEVER_WORKSPACE_DIR,
+    stateDir: process.env.RETRIEVER_STATE_DIR,
+    channel: process.env.RETRIEVER_CHANNEL ? { type: process.env.RETRIEVER_CHANNEL } : undefined,
+    extensions: {
+      pi: {
+        bin: process.env.PI_BIN,
+        extraArgs: process.env.RETRIEVER_PI_EXTRA_ARGS
+          ? process.env.RETRIEVER_PI_EXTRA_ARGS.split(' ').filter(Boolean)
+          : undefined,
+        sessionDir: process.env.RETRIEVER_PI_SESSION_DIR,
+        timeoutMs: process.env.RETRIEVER_PI_TIMEOUT_MS
+          ? Number(process.env.RETRIEVER_PI_TIMEOUT_MS)
+          : undefined,
+      },
+      feishu: {
+        appId: process.env.FEISHU_APP_ID,
+        appSecret: process.env.FEISHU_APP_SECRET,
+      },
     },
   };
 
@@ -122,23 +73,19 @@ export function loadConfig(): AppConfig {
     stripUndefined(envConfig) as Partial<AppConfig>,
   );
   const baseDir = path.dirname(configPath);
-  config.runtime.configPath = configPath;
-  config.agent.cwd = path.resolve(baseDir, config.agent.cwd);
-  if (config.agent.sessionDir)
-    config.agent.sessionDir = path.resolve(baseDir, config.agent.sessionDir);
-  if (config.agent.piBin.includes(path.sep))
-    config.agent.piBin = path.resolve(baseDir, config.agent.piBin);
-  if (config.runtime.stateDir)
-    config.runtime.stateDir = path.resolve(baseDir, config.runtime.stateDir);
-  if (config.runtime.contextFile)
-    config.runtime.contextFile = path.resolve(baseDir, config.runtime.contextFile);
-  config.sender.mockOutbox = path.resolve(baseDir, config.sender.mockOutbox);
+  config.configPath = configPath;
+  config.workspaceDir = path.resolve(baseDir, config.workspaceDir);
+  if (config.stateDir) config.stateDir = path.resolve(baseDir, config.stateDir);
+  const pi = config.extensions.pi;
+  if (pi.sessionDir) pi.sessionDir = path.resolve(baseDir, pi.sessionDir);
+  if (pi.bin.includes(path.sep)) pi.bin = path.resolve(baseDir, pi.bin);
   for (const profile of Object.values(config.agentProfiles || {})) {
+    if (profile.backend === 'mock') continue;
     if (profile.cwd) profile.cwd = path.resolve(baseDir, profile.cwd);
     if (profile.sessionDir) profile.sessionDir = path.resolve(baseDir, profile.sessionDir);
-    if (profile.backend === 'pi' && profile.piBin?.includes(path.sep))
-      profile.piBin = path.resolve(baseDir, profile.piBin);
-    if (profile.backend === 'process' && profile.command?.includes(path.sep))
+    if (profile.backend === 'pi' && profile.bin?.includes(path.sep))
+      profile.bin = path.resolve(baseDir, profile.bin);
+    if (profile.backend === 'process' && profile.command.includes(path.sep))
       profile.command = path.resolve(baseDir, profile.command);
   }
   return config;

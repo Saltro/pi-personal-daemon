@@ -7,7 +7,7 @@ import '../src/extensions/index.js';
 import { createMainAgentRunner } from '../src/core/agents/registry.js';
 import { RuntimeCronDispatcher } from '../src/core/cron/dispatch.js';
 import { loadCronRegistry, saveCronRegistry } from '../src/core/cron/registry.js';
-import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/core/cron/scheduler.js';
+import { nextCronDate } from '../src/core/cron/utils.js';
 import { PersonalDaemon } from '../src/core/daemon/daemon.js';
 import { normalizeInbound } from '../src/core/events.js';
 import { listParentNotifications } from '../src/core/sessions/callbacks.js';
@@ -15,8 +15,7 @@ import { loadRegistry } from '../src/core/sessions/registry.js';
 import { readFeishuChatBinding } from '../src/core/state/binding.js';
 import { readCurrentContext } from '../src/core/state/context.js';
 import { normalizeFeishuInbound } from '../src/extensions/feishu/normalize.js';
-import { isValidFeishuToken } from '../src/extensions/feishu/webhook.js';
-import { extractContextUsage } from '../src/extensions/pi/runner.js';
+import { extractContextUsage, PiRpcRunner } from '../src/extensions/pi/runner.js';
 import type { AppConfig } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'retriever-'));
@@ -24,20 +23,11 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
 const cliPath = path.join(repoRoot, 'dist/index.js');
 const outbox = path.join(tmp, 'outbox.jsonl');
 const config: AppConfig = {
-  agent: { sessionId: 'smoke', cwd: tmp, piBin: 'pi', extraArgs: [], mock: true },
-  http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
-  stdin: { enabled: false },
+  workspaceDir: tmp,
+  agentProfiles: { default: { backend: 'mock' } },
+  extensions: { pi: { bin: 'pi', extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
   sender: { type: 'mock', mockOutbox: outbox },
-  feishu: {
-    appId: '',
-    appSecret: '',
-    verificationToken: 'verify-token',
-    encryptKey: '',
-    baseUrl: 'https://open.feishu.cn',
-    eventMode: 'webhook',
-  },
-  scheduler: { enabled: false, wakeups: [] },
-  runtime: { contextFile: path.join(tmp, 'context.json'), stateDir: path.join(tmp, 'state') },
+  stateDir: path.join(tmp, 'state'),
 };
 const configPath = writeConfig('config.json', config);
 
@@ -47,8 +37,6 @@ assert.equal(v2.chatId, 'oc-test');
 assert.equal(v2.messageId, 'om-test');
 assert.equal(v2.userId, 'ou-test');
 assert.equal(v2.text, 'hello v2');
-assert.equal(isValidFeishuToken({ header: { token: 'verify-token' } }, 'verify-token'), true);
-assert.equal(isValidFeishuToken({ header: { token: 'bad' } }, 'verify-token'), false);
 assert.deepEqual(
   extractContextUsage(
     {
@@ -96,24 +84,6 @@ assert.equal(
 assert.equal(localStamp(nextCronDate('0 9 1 * 1', new Date(2026, 9, 2))), '2026-10-05 09:00');
 assert.equal(nextCronDate('0 0 * 13 *'), null);
 assert.equal(nextCronDate('0-10 * * * *'), null);
-assert.equal(nextDelayMs({ intervalMs: 25, prompt: 'tick' }), 25);
-const scheduledEvents: string[] = [];
-const scheduler = new WakeupScheduler(
-  {
-    ...config,
-    scheduler: {
-      enabled: true,
-      wakeups: [{ id: 'quick', intervalMs: 20, prompt: 'scheduled smoke wake' }],
-    },
-  },
-  async (event) => {
-    scheduledEvents.push(`${event.kind}:${event.source}:${event.text}`);
-    scheduler.stop();
-  },
-);
-scheduler.start();
-await until(() => scheduledEvents.length === 1);
-assert.deepEqual(scheduledEvents, ['wake:scheduler:scheduled smoke wake']);
 
 const daemon = new PersonalDaemon(config, { debounceMs: 20 });
 await daemon.enqueue(
@@ -140,19 +110,20 @@ assert.equal(context.eventId, 'evt-v2');
 assert.equal(context.sendCount, 0);
 assert.equal(context.contextUsage, 'Context usage unavailable');
 assert.equal(readFeishuChatBinding(config)?.chatId, 'oc-test');
-assert.equal(fs.existsSync(path.join(config.runtime.stateDir!, 'state.sqlite')), true);
-assert.equal(fs.existsSync(config.runtime.contextFile!), false);
-assert.equal(fs.existsSync(path.join(config.runtime.stateDir!, 'feishu-chat-binding.json')), false);
+assert.equal(fs.existsSync(path.join(config.stateDir!, 'state.sqlite')), true);
+assert.equal(fs.existsSync(path.join(config.stateDir!, 'feishu-chat-binding.json')), false);
 
 const steerConfig: AppConfig = {
   ...config,
   sender: { type: 'mock', mockOutbox: path.join(tmp, 'steer-outbox.jsonl') },
-  runtime: { stateDir: path.join(tmp, 'steer-state') },
+  stateDir: path.join(tmp, 'steer-state'),
 };
 let running = false;
 let resolveFirst: (() => void) | undefined;
 const steers: string[] = [];
-const steerRunner = createMainAgentRunner(steerConfig);
+const steerRunner = Object.assign(new PiRpcRunner(steerConfig, { mock: true }), {
+  capabilities: { prompt: true, steer: true, history: false, contextUsage: true },
+});
 Object.assign(steerRunner, {
   isRunning: () => running,
   promptAndWait: async () => {
@@ -183,9 +154,9 @@ assert.match(steers[0], /second active/);
 assert.match(steers[0], /third active/);
 assert.equal(running, true);
 resolveFirst?.();
-await until(() => jsonl(steerConfig.sender.mockOutbox).length === 6);
+await until(() => jsonl(steerConfig.sender!.mockOutbox).length === 6);
 for (const messageId of ['om-active-2', 'om-active-3']) {
-  const reactions = jsonl(steerConfig.sender.mockOutbox);
+  const reactions = jsonl(steerConfig.sender!.mockOutbox);
   assert.ok(
     reactions.some((record) => record.messageId === messageId && record.emojiType === 'OK'),
   );
@@ -284,8 +255,10 @@ fs.writeFileSync(
 fs.chmodSync(fakePi, 0o755);
 const asyncConfig: AppConfig = {
   ...config,
-  agent: { ...config.agent, mock: false, piBin: fakePi },
-  runtime: { stateDir: path.join(tmp, 'async-state') },
+  workspaceDir: tmp,
+  agentProfiles: {},
+  extensions: { pi: { bin: fakePi, extraArgs: [] }, feishu: { appId: '', appSecret: '' } },
+  stateDir: path.join(tmp, 'async-state'),
 };
 const asyncConfigPath = writeConfig('config-async.json', asyncConfig);
 const launched = JSON.parse(
@@ -343,7 +316,7 @@ assert.equal(JSON.parse(cli(['cron', 'status', 'c1']).stdout).status, 'disabled'
 cli(['cron', 'delete', 'c1']);
 assert.equal(loadCronRegistry(config).crons.c1, undefined);
 
-const cronConfig: AppConfig = { ...config, runtime: { stateDir: path.join(tmp, 'cron-state') } };
+const cronConfig: AppConfig = { ...config, stateDir: path.join(tmp, 'cron-state') };
 const cronConfigPath = writeConfig('config-cron.json', cronConfig);
 const dueAt = new Date(Date.now() - 1000).toISOString();
 cli(
@@ -406,7 +379,7 @@ assert.ok(
 
 const targetConfig: AppConfig = {
   ...config,
-  runtime: { stateDir: path.join(tmp, 'target-state') },
+  stateDir: path.join(tmp, 'target-state'),
 };
 const targetPath = writeConfig('config-target.json', targetConfig);
 cli(['sessions', 'create', '--id', 'target-s1', '--no-return'], targetPath);

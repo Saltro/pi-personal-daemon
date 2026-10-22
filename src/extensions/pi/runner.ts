@@ -4,13 +4,14 @@ import {
   spawn,
 } from 'node:child_process';
 import readline from 'node:readline';
+import { MAIN_SESSION_ID } from '../../config.js';
 import {
   agentProcessDetached,
   signalAgentProcess,
   waitForAgentProcessExit,
 } from '../../core/runtime/process-control.js';
 import { agentProcessEnv } from '../../core/runtime/process-paths.js';
-import type { AgentConfig, AppConfig } from '../../types.js';
+import type { AppConfig } from '../../types.js';
 
 interface RpcResponse<T = unknown> {
   id?: string;
@@ -38,6 +39,11 @@ interface PendingCommand {
 export interface PiRpcRunnerOptions {
   commandTimeoutMs?: number;
   settledTimeoutMs?: number;
+  cwd?: string;
+  bin?: string;
+  sessionDir?: string;
+  extraArgs?: string[];
+  mock?: boolean;
   spawn?: (
     command: string,
     args: readonly string[],
@@ -76,8 +82,17 @@ interface RpcProcess {
   verifyingExit: boolean;
 }
 
+interface PiRpcRunnerConfig {
+  sessionId: string;
+  cwd: string;
+  bin: string;
+  sessionDir?: string;
+  extraArgs: string[];
+  mock: boolean;
+}
+
 export class PiRpcRunner {
-  private config: AgentConfig;
+  private config: PiRpcRunnerConfig;
   private proc: RpcProcess | null = null;
   private nextId = 1;
   private lastAssistantText = '';
@@ -92,7 +107,14 @@ export class PiRpcRunner {
     private appConfig: AppConfig,
     options: PiRpcRunnerOptions = {},
   ) {
-    this.config = appConfig.agent;
+    this.config = {
+      sessionId: MAIN_SESSION_ID,
+      cwd: options.cwd ?? appConfig.workspaceDir,
+      bin: options.bin ?? appConfig.extensions.pi.bin,
+      sessionDir: options.sessionDir ?? appConfig.extensions.pi.sessionDir,
+      extraArgs: options.extraArgs ?? appConfig.extensions.pi.extraArgs,
+      mock: options.mock ?? false,
+    };
     this.commandTimeoutMs = options.commandTimeoutMs ?? 30_000;
     this.settledTimeoutMs = options.settledTimeoutMs ?? 10 * 60 * 1000;
     this.spawnProcess = options.spawn ?? spawn;
@@ -112,7 +134,7 @@ export class PiRpcRunner {
       ...(this.config.sessionDir ? ['--session-dir', this.config.sessionDir] : []),
       ...(this.config.extraArgs || []),
     ];
-    const child = this.spawnProcess(this.config.piBin, args, {
+    const child = this.spawnProcess(this.config.bin, args, {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: agentProcessDetached,

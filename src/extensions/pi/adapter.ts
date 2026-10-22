@@ -6,21 +6,13 @@ export const piAdapter: AgentAdapter = {
   sessionCapabilities: { prompt: true, steer: false, history: false, contextUsage: false },
   createMainRunner(config, profile) {
     if (profile.backend !== 'pi') throw new Error('invalid Pi agent profile');
-    const runner = new PiRpcRunner(
-      {
-        ...config,
-        agent: {
-          ...config.agent,
-          cwd: profile.cwd || config.agent.cwd,
-          sessionDir: profile.sessionDir,
-          piBin: profile.piBin || 'pi',
-          extraArgs: profile.extraArgs || [],
-          commandTimeoutMs: profile.commandTimeoutMs,
-          mock: false,
-        },
-      },
-      { commandTimeoutMs: profile.commandTimeoutMs },
-    );
+    const runner = new PiRpcRunner(config, {
+      cwd: profile.cwd,
+      sessionDir: profile.sessionDir,
+      bin: profile.bin || config.extensions.pi.bin,
+      extraArgs: profile.extraArgs || [],
+      commandTimeoutMs: profile.timeoutMs,
+    });
     return Object.assign(runner, {
       capabilities: { prompt: true, steer: true, history: true, contextUsage: true },
     });
@@ -28,7 +20,7 @@ export const piAdapter: AgentAdapter = {
   sessionProcess(config, profile, record, prompt) {
     if (profile.backend !== 'pi') throw new Error('invalid Pi agent profile');
     return {
-      command: profile.piBin || 'pi',
+      command: profile.bin || config.extensions.pi.bin,
       args: [
         '--print',
         '--session-id',

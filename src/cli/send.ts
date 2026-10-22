@@ -31,11 +31,11 @@ export async function runSendCli(args: string[], command = 'retriever send'): Pr
   const config = loadConfig();
   const channel = createChannelAdapter(config);
   const binding = readOutputBinding(config);
-  if (!binding && channel.type !== 'stdio')
+  if (!binding && channel.type !== 'stdin')
     throw new Error(
       'Output destination is not bound. Run: retriever bind destination --chat-id <chat_id>',
     );
-  const chatId = binding?.chatId || 'stdio';
+  const chatId = binding?.chatId || 'stdin';
   const context = tryReadCurrentContext(config);
   await channel.sender.send({
     chatId,

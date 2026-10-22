@@ -1,6 +1,6 @@
 # retriever
 
-A local personal daemon with one visible chat destination, a main agent, child sessions, and timed wakeups. Feishu and Pi are the default adapters; channel implementations and per-session agent backends can be selected independently.
+A local personal daemon with one visible chat destination, a main agent, child sessions, and scheduled cron wakeups. Feishu and Pi are the adapters; the channel can be swapped for a terminal session.
 
 **Single-chat and fixed visible output are product choices.** This is not a multi-chat router. All explicit child returns and requested completion notices go to the main agent. Agent-native history, tools, memory, skills, and compression stay with the selected backend.
 
@@ -59,80 +59,43 @@ retriever daemon restart
 retriever daemon stop
 ```
 
-The pid file and background log live in `runtime.stateDir` (`daemon.pid`, `daemon.log`), so each state directory is managed independently. `start` refuses to run when a live pid already exists; `status` prints JSON and exits 1 when the daemon is not running. A pid file whose process is gone is reported as `stalePid` and removed by the next `status`, `restart`, or `stop`. Stopping sends `SIGTERM` and waits up to ten seconds for exit; it reports the log path instead of escalating to `SIGKILL`.
+The pid file and background log live in `stateDir` (`daemon.pid`, `daemon.log`), so each state directory is managed independently. `start` refuses to run when a live pid already exists; `status` prints JSON and exits 1 when the daemon is not running. A pid file whose process is gone is reported as `stalePid` and removed by the next `status`, `restart`, or `stop`. Stopping sends `SIGTERM` and waits up to ten seconds for exit; it reports the log path instead of escalating to `SIGKILL`.
 
 Bundles: `dist/index.js` (daemon and CLI) and `dist/session-watcher.js` (async supervisor). The build also writes executable `dist/retriever` and `dist/retr` helpers. Running `retriever` without arguments starts the daemon; `send`, `return`, `bind`, `sessions`, `cron`, and `update` run their subcommands and exit, and `version` prints the installed version. Use the installed package binary or put `dist` on your PATH for manual calls; agent subprocesses receive the installed helper path automatically.
 
 ## Configuration
 
-`RETRIEVER_CONFIG` selects a config file; otherwise the CLI loads `config.json` from its current directory. `src/config.ts` merges defaults, file configuration, and existing environment overrides. The resolved config path is passed to child processes, including when their working directory differs from the install directory.
+`RETRIEVER_CONFIG` selects a config file. Without it, the CLI reads `$XDG_CONFIG_HOME/retriever/config.json`, defaulting to `~/.config/retriever/config.json`. `src/config.ts` merges defaults, file configuration, and environment overrides. Relative paths resolve against the config file directory, and the resolved path is passed to child processes.
 
-Default adapter configuration (Feishu channel, Pi agent profile):
+Default configuration (Feishu channel, Pi agent):
 
 ```json
 {
-  "agent": {
-    "sessionId": "personal-agent",
-    "cwd": "/path/to/workspace",
-    "piBin": "pi",
-    "extraArgs": [],
-    "mock": false
-  },
+  "workspaceDir": "/path/to/workspace",
   "channel": { "type": "feishu" },
-  "sender": { "type": "mock", "mockOutbox": "./outbox.jsonl" },
-  "runtime": { "stateDir": "/path/to/daemon-state" }
-}
-```
-
-Common overrides: `RETRIEVER_AGENT_SESSION_ID`, `RETRIEVER_AGENT_CWD`, `PI_BIN`, `RETRIEVER_AGENT_SESSION_DIR`, `RETRIEVER_AGENT_EXTRA_ARGS`, `RETRIEVER_AGENT_MOCK`, `RETRIEVER_CHANNEL`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_VERIFICATION_TOKEN`, `FEISHU_ENCRYPT_KEY`, and `FEISHU_BASE_URL`. Extra args are space-separated in the environment variable; use JSON arrays in config for arguments containing spaces.
-
-### Channel adapters
-
-- **`feishu`** (default): existing webhook / WebSocket receivers, interactive-card sender, reactions, and ten-second user-message debounce. `sender.type=mock` writes cards and reactions to JSONL instead of calling Feishu.
-- **`stdio`**: stdin ingestion and plain-text stdout output from `retriever send`; no Feishu receiver, card, reaction, or debounce. Output belongs to the send process's stdout, so it is useful for local pipelines/debugging rather than a separate terminal notification service.
-
-`stdin.enabled` remains an optional input source with either adapter. Feishu `eventMode` accepts `ws`, `webhook`, or both via the existing configuration. Real Feishu sending needs `sender.type=feishu` and app credentials. Webhook verification / encrypted payload handling remains in the Feishu receiver.
-
-The static registry in `src/core/channels/registry.ts` defines the adapter boundary: receiver lifecycle, sender, binding behavior, debounce, and dedupe. Implementations live in `src/extensions/` and are registered once by `src/extensions/channels.ts`. Registration is compiled in, so every entry bundle loads the same adapters; there is no dynamic plugin loader or multi-chat routing.
-
-### Agent profiles
-
-The legacy `agent` config is the default profile. Add named profiles for sessions or select one for the main agent with `agent.profile`:
-
-```json
-{
-  "agentProfiles": {
-    "research": {
-      "backend": "pi",
-      "piBin": "pi",
-      "cwd": "/path/to/research-workspace",
-      "extraArgs": [],
-      "commandTimeoutMs": 30000
-    },
-    "other-harness": {
-      "backend": "process",
-      "command": "/path/to/agent-cli",
-      "args": [],
-      "promptMode": "stdin",
-      "timeoutMs": 600000,
-      "cwd": "/path/to/workspace"
-    },
-    "fake": {
-      "backend": "mock",
-      "replyPrefix": "mock reply: "
-    }
+  "extensions": {
+    "pi": { "bin": "pi", "extraArgs": [] },
+    "feishu": { "appId": "", "appSecret": "" }
   }
 }
 ```
 
-Built-in backends:
-- **`pi`**: main session uses persistent JSON-lines RPC; child prompts use Pi's print execution. Supports steer, native message access, and context usage. Child `--wait` awaits the supervised execution outcome; it does not change the backend protocol.
-- **`process`**: runs an external harness command for each prompt, plain-text stdin by default. `promptMode=argument` expands `{prompt}` / `{sessionId}` templates, appending the prompt if no `{prompt}` template exists. This is not Pi RPC; steer/native history/context usage are explicitly unavailable. The external harness owns any persistent history and can use the session ID supplied by the adapter. Optional `timeoutMs` applies to main and child runs (positive milliseconds, at most 2,147,483,647); main defaults to ten minutes when omitted, while child runs have no execution deadline unless configured.
-- **`mock`**: local deterministic results for testing.
+`workspaceDir` is the working directory for the main agent and for child sessions without their own `cwd`. `stateDir` overrides the state directory, which defaults to `$XDG_STATE_HOME/retriever`, or `~/.local/state/retriever`.
 
-`sessions create --agent <profile>` saves the chosen profile and resolved options. Later sends and fixed-session crons retain that selection even if global defaults change. Imported sessions without an agent selection use the legacy `agent` Pi/mock settings, not a newly selected main profile; retain those settings when switching main to another backend. There is no automatic cross-backend history migration. New sessions without `--agent` use the main/default profile.
+Common overrides: `RETRIEVER_WORKSPACE_DIR`, `RETRIEVER_CHANNEL`, `PI_BIN`, `RETRIEVER_PI_SESSION_DIR`, `RETRIEVER_PI_EXTRA_ARGS`, `RETRIEVER_PI_TIMEOUT_MS`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `RETRIEVER_STATE_DIR`. Extra args are space-separated in the environment variable; use JSON arrays in config for arguments containing spaces.
 
-The capability contract and selection logic are in `src/core/agents/`. Backends live in `src/extensions/` and are registered by `src/extensions/agents.ts`, which the daemon, CLI, and session supervisor each import. Add a backend there rather than teaching the core to imitate a backend's CLI protocol. A main backend without steer simply queues subsequent user-message batches instead of attempting unsupported steering.
+### Channel adapters
+
+- **`feishu`** (default): Feishu WebSocket receiver, interactive-card sender, reactions, and ten-second user-message debounce. Needs `extensions.feishu.appId` and `appSecret`.
+- **`stdin`**: reads plain text or JSON lines from stdin and prints replies to stdout; no Feishu receiver, card, reaction, or debounce. Useful for local pipelines and debugging.
+
+The static registry in `src/core/channels/registry.ts` defines the adapter boundary: receiver lifecycle, sender, binding behavior, debounce, and dedupe. Implementations live in `src/extensions/` and are registered once by `src/extensions/channels.ts`. Registration is compiled in, so every entry bundle loads the same adapters; there is no dynamic plugin loader or multi-chat routing.
+
+### Agent backend
+
+The main session and child sessions use the `pi` backend configured by `extensions.pi`. The main session owns a persistent JSON-lines RPC process; child prompts use Pi's print execution. A main backend without steer queues subsequent user-message batches instead of attempting unsupported steering.
+
+The capability contract and selection logic are in `src/core/agents/`. Backends live in `src/extensions/` and are registered by `src/extensions/agents.ts`, which the daemon, CLI, and session supervisor each import. Add a backend there rather than teaching the core to imitate a backend's CLI protocol.
 
 ## Fixed output and returns
 
@@ -147,7 +110,7 @@ retriever send '**hello** from markdown'
 printf 'longer reply' | retriever send --stdin
 ```
 
-The first real Feishu message auto-binds when no destination exists. Every visible reply uses the bound destination, not the latest callback's parent metadata. `stdio` can send without a prior binding.
+The first real Feishu message auto-binds when no destination exists. Every visible reply uses the bound destination, not the latest callback's parent metadata. The `stdin` channel can send without a prior binding.
 
 The daemon does not automatically forward final agent text. Prompts tell the agent to use `retriever send` for visible output. Feishu renders card JSON 2.0 markdown and a grey context occupancy footer. Send accounting updates the current SQLite context atomically; an event switch while the network send is in flight does not increment the new event's count.
 
@@ -163,9 +126,9 @@ It needs parent metadata supplied by a session/cron launch or the surrounding Pi
 ## Sessions
 
 ```bash
-retriever sessions create --id research-1 --agent research --name Research --prompt 'look into X' --wait
+retriever sessions create --id research-1 --name Research --prompt 'look into X' --wait
 retriever sessions send research-1 --message 'continue with Y' --wait
-retriever sessions create --agent other-harness --prompt 'run asynchronously' --no-return
+retriever sessions create --prompt 'run asynchronously' --no-return
 retriever sessions create --prompt 'run and return the result to main' --return
 retriever sessions list
 retriever sessions status research-1
@@ -185,42 +148,23 @@ Completion state and its requested callback are committed together in SQLite. Ca
 
 ## SQLite state and migration
 
-Mutable daemon state lives in `runtime.stateDir/state.sqlite`, defaulting to `~/.cache/retriever/state.sqlite`. Session/cron records are independent SQL records; current context and output binding remain singleton state. WAL, a busy timeout, short transactions, field updates, and conditional run-token writes handle multiple CLI/watcher processes.
+Mutable daemon state lives in `<stateDir>/state.sqlite`, defaulting to `~/.local/state/retriever/state.sqlite`. Session/cron records are independent SQL records; current context and output binding remain singleton state. WAL, a busy timeout, short transactions, field updates, and conditional run-token writes handle multiple CLI/watcher processes.
 
-`runtime.contextFile` only selects the legacy context import location; it does not change the state directory. Without `stateDir`, state lives in `~/.cache/retriever`, so sessions, crons, binding, and callbacks share one root. Tests and isolated clients must set an explicit temporary `stateDir`. `contextFile` is not an actively rewritten JSON projection.
+Sessions, crons, binding, and callbacks share the state directory. Tests and isolated clients set an explicit temporary `stateDir`.
 
 First database access imports existing daemon JSON state transactionally and once:
 - `sessions/registry.json`
 - `cron/registry.json`
 - `feishu-chat-binding.json`
-- the configured legacy current context file
 - existing `session-callbacks` notices
 
 Before deploying this migration, stop the old daemon and all old state-writing CLI/watchers. Keep the same state directory and verify the new records with CLI status/list commands. Malformed legacy state fails import with an error rather than being silently discarded. Source JSON files are retained; new code does not dual-write them. Do not keep old and new writers running together. Schema version 3 renames the automatic-return field while preserving existing session settings; old JSON fields are accepted only during import, not as CLI aliases.
 
-Logs, mock outbox, config, and Pi-native history/memory/skills remain files. Runtime SQL transactions never wait on model execution, spawn, RPC, or network calls. No real cache migration is performed by the test suite.
+Logs, config, and Pi-native history/memory/skills remain files. Runtime SQL transactions never wait on model execution, spawn, RPC, or network calls. No real cache migration is performed by the test suite.
 
-## Scheduler and runtime cron
+## Runtime cron
 
-Config wakeups accept an interval or standard five-field cron subset:
-
-```json
-{
-  "scheduler": {
-    "enabled": true,
-    "wakeups": [
-      {
-        "id": "hourly",
-        "intervalMs": 3600000,
-        "prompt": "Inspect context and decide whether to send."
-      },
-      { "id": "morning", "cron": "30 9 * * *", "prompt": "Morning review." }
-    ]
-  }
-}
-```
-
-Supported fields: `minute hour day-of-month month day-of-week`; `*`, `*/n`, numbers, comma lists. Sunday is `0` or `7`. Specific day-of-month and day-of-week use OR matching. Dates use the machine's local timezone. Ranges/names/seconds/macros are not supported. Long waits are split into bounded timers and the actual due time is checked before firing.
+Cron schedules live only in SQLite and are managed through the CLI:
 
 Persisted runtime schedules:
 
@@ -246,7 +190,7 @@ retriever cron delete hourly
 
 ## Main RPC reliability
 
-Pi commands have a response deadline (30 seconds by default, configurable with `commandTimeoutMs` in the Pi profile or legacy `agent` config), distinct from agent completion (10 minutes by default). Spawn/write/exit/close/timeout clean up pending commands and settled waiters. A timeout terminates the uncertain process; replacement waits for its exit rather than overlapping on the same session. Context occupancy derives only from meaningful token/context fields, not message counts or output-token limits.
+Pi commands have a response deadline (30 seconds by default, configurable with `timeoutMs` in the Pi profile or `extensions.pi`), distinct from agent completion (10 minutes by default). Spawn/write/exit/close/timeout clean up pending commands and settled waiters. A timeout terminates the uncertain process; replacement waits for its exit rather than overlapping on the same session. Context occupancy derives only from meaningful token/context fields, not message counts or output-token limits.
 
 ## Source layout
 
@@ -265,21 +209,20 @@ src/
     cron/                  cron parsing, persisted schedules, runtime dispatch
     state/                 SQLite schema/transactions, binding, current context
     runtime/               subprocess paths/env and owned process-group control
-    input/stdin.ts         optional stdin input source
   extensions/              compiled-in channel and agent implementations
     index.ts               registers both groups; used by the daemon and CLI
     agents.ts              agent-only registration for the session supervisor
     channels.ts            channel-only registration
-    feishu/                channel, WebSocket/webhook receivers, sender, normalization
-    stdio/                 terminal channel
+    feishu/                channel, WebSocket receiver, sender, normalization
+    stdin/                 terminal channel
     pi/                    adapter and JSON-lines RPC runner
     process/               external harness adapter
     mock/                  deterministic test adapter
-test/                      storage, process lifecycle, scheduler, backend/channel, session and smoke coverage
+test/                      storage, process lifecycle, backend/channel, session and smoke coverage
 ```
 
 `src/core/` never imports Feishu or Pi specifics; `src/extensions/` may import core contracts. The supervisor imports `src/extensions/agents.ts` only, so session runs do not load the Feishu SDK. Each entry builds into a single self-contained file, so no runtime chunk resolution is involved.
 
 ## Remaining limits
 
-One daemon is supported per state directory; there is no multi-daemon lease system. Ordinary incoming events still queue in memory and can be lost on exit; persisted callbacks have the retry policy above. Unix harness cancellation covers the owned process group; a harness that deliberately creates a separate detached group is outside that guarantee. Feishu supports text/markdown cards and reactions, not full attachment/media workflows. Webhook authentication remains the existing local-deployment design. There is no arbitrary parent-session router, hot-loaded plugin system, or backend-history migration.
+One daemon is supported per state directory; there is no multi-daemon lease system. Ordinary incoming events still queue in memory and can be lost on exit; persisted callbacks have the retry policy above. Unix harness cancellation covers the owned process group; a harness that deliberately creates a separate detached group is outside that guarantee. Feishu supports text/markdown cards and reactions, not full attachment/media workflows. There is no arbitrary parent-session router, hot-loaded plugin system, or backend-history migration.

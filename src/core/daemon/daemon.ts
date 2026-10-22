@@ -1,11 +1,8 @@
-import type { Interface } from 'node:readline';
 import type { AppConfig, InboundEvent } from '../../types.js';
 import { type AgentRunner, createMainAgentRunner } from '../agents/registry.js';
 import { type ChannelAdapter, createChannelAdapter } from '../channels/registry.js';
 import { RuntimeCronDispatcher } from '../cron/dispatch.js';
-import { WakeupScheduler } from '../cron/scheduler.js';
 import { toAgentPrompt } from '../events.js';
-import { startStdinReceiver } from '../input/stdin.js';
 import {
   acknowledgeParentNotification,
   claimParentNotifications,
@@ -35,8 +32,6 @@ export class PersonalDaemon {
   private callbacksRecovered = false;
   private callbackDeliveryScheduled = false;
   private debounceMs: number;
-  private stdinReceiver: Interface | null = null;
-  private scheduler: WakeupScheduler;
   private runtimeCron: RuntimeCronDispatcher;
   private callbackPoller: NodeJS.Timeout | null = null;
   private seenInbound = new Map<string, number>();
@@ -50,7 +45,6 @@ export class PersonalDaemon {
     this.runner = options.runner || createMainAgentRunner(config);
     this.channel = options.channel || createChannelAdapter(config);
     this.debounceMs = options.debounceMs ?? USER_MESSAGE_DEBOUNCE_MS;
-    this.scheduler = new WakeupScheduler(config, (event) => this.enqueue(event));
     this.runtimeCron = new RuntimeCronDispatcher(config, (event) => this.enqueue(event));
   }
 
@@ -59,8 +53,6 @@ export class PersonalDaemon {
     this.channel
       .start((event) => this.enqueue(event))
       .catch((error) => console.error(`[channel] ${error.stack || error}`));
-    this.stdinReceiver = startStdinReceiver(this.config, (event) => this.enqueue(event));
-    this.scheduler.start();
     this.runtimeCron.start();
     this.startCallbackPoller();
   }
@@ -272,13 +264,11 @@ export class PersonalDaemon {
 
   stop(): void {
     this.stopped = true;
-    this.scheduler.stop();
     this.runtimeCron.stop();
     if (this.callbackPoller) clearInterval(this.callbackPoller);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debouncedMessages = [];
     this.channel.close();
-    this.stdinReceiver?.close();
     this.runner.close();
   }
 }

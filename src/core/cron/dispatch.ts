@@ -1,3 +1,4 @@
+import { MAIN_SESSION_ID } from '../../config.js';
 import type { AppConfig, InboundEvent } from '../../types.js';
 import { normalizeInbound } from '../events.js';
 import { callbackQueuePath } from '../sessions/callbacks.js';
@@ -229,10 +230,10 @@ function fixedSessionTarget(
 
 function mainParentCallback(config: AppConfig): ParentCallback {
   return {
-    sessionId: config.agent.sessionId,
-    cwd: config.agent.cwd,
-    sessionDir: config.agent.sessionDir,
-    queuePath: callbackQueuePath(config, config.agent.sessionId),
+    sessionId: MAIN_SESSION_ID,
+    cwd: config.workspaceDir,
+    sessionDir: config.extensions.pi.sessionDir,
+    queuePath: callbackQueuePath(config, MAIN_SESSION_ID),
     createdAt: new Date().toISOString(),
   };
 }

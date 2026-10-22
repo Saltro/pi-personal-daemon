@@ -1,12 +1,24 @@
-export interface AgentConfig {
-  sessionId: string;
-  cwd: string;
-  piBin: string;
-  sessionDir?: string;
+/** Internal test-only surface: a mock sender captures outbound replies. */
+export interface SenderConfig {
+  type: string;
+  mockOutbox: string;
+}
+
+export interface ExtensionsConfig {
+  pi: PiExtensionConfig;
+  feishu: FeishuExtensionConfig;
+}
+
+export interface PiExtensionConfig {
+  bin: string;
   extraArgs: string[];
-  mock: boolean;
-  profile?: string;
-  commandTimeoutMs?: number;
+  sessionDir?: string;
+  timeoutMs?: number;
+}
+
+export interface FeishuExtensionConfig {
+  appId: string;
+  appSecret: string;
 }
 
 interface AgentProfileBase {
@@ -16,9 +28,9 @@ interface AgentProfileBase {
 
 export interface PiAgentProfile extends AgentProfileBase {
   backend: 'pi';
-  piBin?: string;
+  bin?: string;
   extraArgs?: string[];
-  commandTimeoutMs?: number;
+  timeoutMs?: number;
 }
 
 export interface MockAgentProfile extends AgentProfileBase {
@@ -38,61 +50,16 @@ export interface ProcessAgentProfile extends AgentProfileBase {
 
 export type AgentProfile = PiAgentProfile | MockAgentProfile | ProcessAgentProfile;
 
-export interface RuntimeConfig {
-  contextFile?: string;
-  stateDir?: string;
-  configPath?: string;
-}
-
-export interface HttpConfig {
-  enabled: boolean;
-  host: string;
-  port: number;
-  path: string;
-}
-
-export interface StdinConfig {
-  enabled: boolean;
-}
-
-export interface SenderConfig {
-  type: 'mock' | 'feishu' | string;
-  mockOutbox: string;
-}
-
-export interface FeishuConfig {
-  appId: string;
-  appSecret: string;
-  verificationToken: string;
-  encryptKey: string;
-  baseUrl: string;
-  eventMode: 'ws' | 'webhook' | 'both';
-}
-
-export interface WakeupConfig {
-  id?: string;
-  intervalMs?: number;
-  cron?: string;
-  prompt?: string;
-  text?: string;
-  chatId?: string;
-}
-
-export interface SchedulerConfig {
-  enabled: boolean;
-  wakeups: WakeupConfig[];
-}
-
 export interface AppConfig {
-  agent: AgentConfig;
+  workspaceDir: string;
   agentProfiles?: Record<string, AgentProfile>;
   channel?: { type: string };
-  http: HttpConfig;
-  stdin: StdinConfig;
-  sender: SenderConfig;
-  feishu: FeishuConfig;
-  scheduler: SchedulerConfig;
-  runtime: RuntimeConfig;
+  extensions: ExtensionsConfig;
+  stateDir?: string;
+  /** Internal: resolved config file path used to resolve relative paths. */
+  configPath?: string;
+  /** Internal: test-only outbound capture. */
+  sender?: SenderConfig;
 }
 
 export interface InboundEvent {

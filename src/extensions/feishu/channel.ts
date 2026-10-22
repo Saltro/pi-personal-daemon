@@ -2,7 +2,6 @@ import type { ChannelAdapter } from '../../core/channels/registry.js';
 import { ensureFeishuChatBinding, readFeishuChatBinding } from '../../core/state/binding.js';
 import type { AppConfig, InboundEvent, Sender } from '../../types.js';
 import { createSender } from './sender.js';
-import { startHttpReceiver } from './webhook.js';
 import { startFeishuWsReceiver } from './ws.js';
 
 export class FeishuChannel implements ChannelAdapter {
@@ -10,7 +9,6 @@ export class FeishuChannel implements ChannelAdapter {
   readonly label = 'Feishu';
   readonly sender: Sender;
   private closed = false;
-  private http: ReturnType<typeof startHttpReceiver> = null;
   private ws: Awaited<ReturnType<typeof startFeishuWsReceiver>> = null;
 
   constructor(private config: AppConfig) {
@@ -19,17 +17,13 @@ export class FeishuChannel implements ChannelAdapter {
 
   async start(onEvent: (event: InboundEvent) => Promise<void>): Promise<void> {
     if (this.closed) return;
-    if (this.config.feishu.eventMode !== 'ws') this.http = startHttpReceiver(this.config, onEvent);
-    if (this.config.feishu.eventMode !== 'webhook') {
-      const ws = await startFeishuWsReceiver(this.config, onEvent);
-      if (this.closed) ws?.close({ force: true });
-      else this.ws = ws;
-    }
+    const ws = await startFeishuWsReceiver(this.config, onEvent);
+    if (this.closed) ws?.close({ force: true });
+    else this.ws = ws;
   }
 
   close(): void {
     this.closed = true;
-    this.http?.close();
     this.ws?.close({ force: true });
   }
 

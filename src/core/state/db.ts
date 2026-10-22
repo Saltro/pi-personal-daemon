@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { AppConfig } from '../../types.js';
 import type { RuntimeCronRecord } from '../cron/registry.js';
 import { normalizeRuntimeCron } from '../cron/registry.js';
-import { legacyContextPath, stateDbPath, stateDir } from './paths.js';
+import { stateDbPath, stateDir } from './paths.js';
 
 const SCHEMA_VERSION = 3;
 const connections = new Map<string, DatabaseSync>();
@@ -358,25 +358,6 @@ function importLegacyState(db: DatabaseSync, config: AppConfig): void {
       );
     }
   });
-  const context = legacyContextPath(config);
-  if (context)
-    importFile(context, (record) => {
-      requireStrings(record, ['chatId', 'eventId', 'source', 'kind', 'startedAt']);
-      requireDates(record, ['startedAt', 'lastSentAt']);
-      optionalStrings(record, ['messageId', 'contextUsage', 'contextUsageSource']);
-      requireChoice(record.kind, ['message', 'wake'], 'context kind');
-      if (!Number.isInteger(record.textChars) || Number(record.textChars) < 0)
-        throw new Error('context textChars must be a nonnegative integer');
-      if (record.sendCount === undefined) record.sendCount = 0;
-      if (!Number.isInteger(record.sendCount) || Number(record.sendCount) < 0)
-        throw new Error('context sendCount must be a nonnegative integer');
-      insertStateRow(
-        db,
-        'current_context',
-        { singleton: 'number', ...contextFields },
-        { singleton: 1, ...record },
-      );
-    });
   importFile(path.join(root, 'feishu-chat-binding.json'), (record) => {
     requireStrings(record, ['chatId', 'createdAt', 'updatedAt']);
     requireDates(record, ['createdAt', 'updatedAt']);
