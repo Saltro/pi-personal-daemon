@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/core/cron/scheduler.js';
 import type { WakeupSchedulerOptions } from '../src/core/cron/scheduler.js';
+import { nextCronDate, nextDelayMs, WakeupScheduler } from '../src/core/cron/scheduler.js';
 import type { AppConfig, InboundEvent, WakeupConfig } from '../src/types.js';
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -24,7 +24,7 @@ class FakeClock {
         assert.ok(delay >= 1 && delay <= MAX_TIMER_DELAY_MS, `unsafe Node timer delay: ${delay}`);
         return timer;
       },
-      clearTimeout: timer => {
+      clearTimeout: (timer) => {
         this.cleared.push(timer);
         this.timers.delete(timer);
       },
@@ -49,11 +49,24 @@ class FakeClock {
 
 function config(wakeups: WakeupConfig[], enabled = true): AppConfig {
   return {
-    agent: { sessionId: 'scheduler-test', cwd: process.cwd(), piBin: 'pi', extraArgs: [], mock: true },
+    agent: {
+      sessionId: 'scheduler-test',
+      cwd: process.cwd(),
+      piBin: 'pi',
+      extraArgs: [],
+      mock: true,
+    },
     http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
     stdin: { enabled: false },
     sender: { type: 'mock', mockOutbox: '' },
-    feishu: { appId: '', appSecret: '', verificationToken: '', encryptKey: '', baseUrl: '', eventMode: 'webhook' },
+    feishu: {
+      appId: '',
+      appSecret: '',
+      verificationToken: '',
+      encryptKey: '',
+      baseUrl: '',
+      eventMode: 'webhook',
+    },
     scheduler: { enabled, wakeups },
     runtime: {},
   };
@@ -63,9 +76,13 @@ await test('long interval waits in bounded chunks and never fires before its act
   const intervalMs = MAX_TIMER_DELAY_MS + 5000;
   const clock = new FakeClock(0);
   const events: InboundEvent[] = [];
-  const scheduler = new WakeupScheduler(config([{ id: 'long', intervalMs, prompt: 'long interval' }]), async event => {
-    events.push(event);
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ id: 'long', intervalMs, prompt: 'long interval' }]),
+    async (event) => {
+      events.push(event);
+    },
+    clock.options(),
+  );
   scheduler.start();
   scheduler.start();
   assert.equal(clock.timers.size, 1);
@@ -92,9 +109,13 @@ await test('monthly cron survives a wait longer than Node timer range and keeps 
   const dueAt = new Date(2026, 1, 1).getTime();
   const clock = new FakeClock(start);
   const firedAt: number[] = [];
-  const scheduler = new WakeupScheduler(config([{ cron: '0 0 1 * *', prompt: 'monthly' }]), async () => {
-    firedAt.push(clock.time);
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ cron: '0 0 1 * *', prompt: 'monthly' }]),
+    async () => {
+      firedAt.push(clock.time);
+    },
+    clock.options(),
+  );
   scheduler.start();
   assert.equal(clock.nextDelay(), MAX_TIMER_DELAY_MS);
   clock.fireNext();
@@ -117,9 +138,13 @@ await test('monthly cron survives a wait longer than Node timer range and keeps 
 await test('early timer or clock rollback rechecks the original due time', async () => {
   const clock = new FakeClock(1000);
   const firedAt: number[] = [];
-  const scheduler = new WakeupScheduler(config([{ intervalMs: 100, prompt: 'tick' }]), async () => {
-    firedAt.push(clock.time);
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ intervalMs: 100, prompt: 'tick' }]),
+    async () => {
+      firedAt.push(clock.time);
+    },
+    clock.options(),
+  );
   scheduler.start();
   clock.fireNext(-500);
   assert.deepEqual(firedAt, []);
@@ -138,10 +163,16 @@ await test('interval cadence remains an interval after handler completion, witho
   const clock = new FakeClock(0);
   let finish: (() => void) | undefined;
   let fires = 0;
-  const scheduler = new WakeupScheduler(config([{ intervalMs: 100, prompt: 'tick' }]), async () => {
-    fires++;
-    await new Promise<void>(resolve => { finish = resolve; });
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ intervalMs: 100, prompt: 'tick' }]),
+    async () => {
+      fires++;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
+    clock.options(),
+  );
   scheduler.start();
   clock.fireNext();
   assert.equal(fires, 1);
@@ -158,10 +189,14 @@ await test('late cron fires once then schedules the next real cron boundary', as
   const start = new Date(2026, 0, 2, 10, 0).getTime();
   const clock = new FakeClock(start);
   let fires = 0;
-  const scheduler = new WakeupScheduler(config([{ cron: '* * * * *', prompt: 'minute' }]), async () => {
-    fires++;
-    clock.time += 10_000;
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ cron: '* * * * *', prompt: 'minute' }]),
+    async () => {
+      fires++;
+      clock.time += 10_000;
+    },
+    clock.options(),
+  );
   scheduler.start();
   assert.equal(clock.nextDelay(), 60_000);
   clock.fireNext(145_000);
@@ -174,11 +209,15 @@ await test('late cron fires once then schedules the next real cron boundary', as
 await test('stop clears every timer and stale callbacks do not fire or reschedule', async () => {
   const clock = new FakeClock(0);
   let fires = 0;
-  const scheduler = new WakeupScheduler(config([{ intervalMs: 100 }, { intervalMs: MAX_TIMER_DELAY_MS + 1 }]), async () => {
-    fires++;
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ intervalMs: 100 }, { intervalMs: MAX_TIMER_DELAY_MS + 1 }]),
+    async () => {
+      fires++;
+    },
+    clock.options(),
+  );
   scheduler.start();
-  const callbacks = [...clock.timers.values()].map(task => task.callback);
+  const callbacks = [...clock.timers.values()].map((task) => task.callback);
   scheduler.stop();
   assert.equal(clock.timers.size, 0);
   assert.equal(clock.cleared.length, 2);
@@ -192,10 +231,16 @@ await test('stop/restart does not let the old in-flight handler schedule duplica
   const clock = new FakeClock(0);
   let finish: (() => void) | undefined;
   let fires = 0;
-  const scheduler = new WakeupScheduler(config([{ intervalMs: 100 }]), async () => {
-    fires++;
-    await new Promise<void>(resolve => { finish = resolve; });
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ intervalMs: 100 }]),
+    async () => {
+      fires++;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
+    clock.options(),
+  );
   scheduler.start();
   clock.fireNext();
   assert.equal(fires, 1);
@@ -211,9 +256,13 @@ await test('stop/restart does not let the old in-flight handler schedule duplica
 
 await test('a rejected handler still preserves cadence without an unhandled rejection', async () => {
   const clock = new FakeClock(0);
-  const scheduler = new WakeupScheduler(config([{ intervalMs: 100 }]), async () => {
-    throw new Error('fake handler failure');
-  }, clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ intervalMs: 100 }]),
+    async () => {
+      throw new Error('fake handler failure');
+    },
+    clock.options(),
+  );
   scheduler.start();
   clock.fireNext();
   await Promise.resolve();
@@ -224,7 +273,11 @@ await test('a rejected handler still preserves cadence without an unhandled reje
 
 await test('stop during a handler prevents any timer from being rearmed', async () => {
   const clock = new FakeClock(0);
-  const scheduler = new WakeupScheduler(config([{ intervalMs: 10 }]), async () => scheduler.stop(), clock.options());
+  const scheduler = new WakeupScheduler(
+    config([{ intervalMs: 10 }]),
+    async () => scheduler.stop(),
+    clock.options(),
+  );
   scheduler.start();
   clock.fireNext();
   await Promise.resolve();
@@ -233,10 +286,18 @@ await test('stop during a handler prevents any timer from being rearmed', async 
 
 await test('disabled and invalid schedules create no timers, and nextDelayMs keeps interval/cron semantics', () => {
   const clock = new FakeClock(0);
-  const disabled = new WakeupScheduler(config([{ intervalMs: 100 }], false), async () => undefined, clock.options());
+  const disabled = new WakeupScheduler(
+    config([{ intervalMs: 100 }], false),
+    async () => undefined,
+    clock.options(),
+  );
   disabled.start();
   assert.equal(clock.timers.size, 0);
-  const invalid = new WakeupScheduler(config([{ cron: 'invalid' }]), async () => undefined, clock.options());
+  const invalid = new WakeupScheduler(
+    config([{ cron: 'invalid' }]),
+    async () => undefined,
+    clock.options(),
+  );
   invalid.start();
   assert.equal(clock.timers.size, 0);
   invalid.stop();

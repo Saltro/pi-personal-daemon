@@ -1,6 +1,6 @@
+import type { AppConfig, InboundEvent, SchedulerConfig, WakeupConfig } from '../../types.js';
 import { normalizeInbound } from '../events.js';
 import { nextCronDate, parseCronExpression } from './utils.js';
-import type { AppConfig, InboundEvent, SchedulerConfig, WakeupConfig } from '../../types.js';
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -20,7 +20,11 @@ export class WakeupScheduler {
   private setTimer: NonNullable<WakeupSchedulerOptions['setTimeout']>;
   private clearTimer: NonNullable<WakeupSchedulerOptions['clearTimeout']>;
 
-  constructor(config: AppConfig, onEvent: (event: InboundEvent) => Promise<void>, options: WakeupSchedulerOptions = {}) {
+  constructor(
+    config: AppConfig,
+    onEvent: (event: InboundEvent) => Promise<void>,
+    options: WakeupSchedulerOptions = {},
+  ) {
     this.config = config.scheduler;
     this.onEvent = onEvent;
     this.now = options.now ?? Date.now;
@@ -49,7 +53,9 @@ export class WakeupScheduler {
     const now = this.now();
     const delay = nextDelayMs(wakeup, new Date(now));
     if (delay == null) {
-      console.error(`[scheduler] unsupported wakeup ${wakeup.id || 'unnamed'}; use intervalMs or cron fields with *, */n, numbers, and comma lists`);
+      console.error(
+        `[scheduler] unsupported wakeup ${wakeup.id || 'unnamed'}; use intervalMs or cron fields with *, */n, numbers, and comma lists`,
+      );
       return;
     }
     console.error(`[scheduler] scheduled ${wakeup.id || 'wake'} in ${Math.round(delay / 1000)}s`);
@@ -66,7 +72,11 @@ export class WakeupScheduler {
         this.waitUntil(wakeup, dueAt, generation);
         return;
       }
-      this.fire(wakeup, generation).catch(error => console.error(`[scheduler] wakeup failed: ${error instanceof Error ? error.message : String(error)}`));
+      this.fire(wakeup, generation).catch((error) =>
+        console.error(
+          `[scheduler] wakeup failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
     }, delay);
     this.timers.add(timer);
   }
@@ -81,7 +91,8 @@ export class WakeupScheduler {
 }
 
 export function nextDelayMs(wakeup: WakeupConfig, now = new Date()): number | null {
-  if (Number.isFinite(wakeup.intervalMs) && (wakeup.intervalMs as number) > 0) return wakeup.intervalMs as number;
+  if (Number.isFinite(wakeup.intervalMs) && (wakeup.intervalMs as number) > 0)
+    return wakeup.intervalMs as number;
   if (!wakeup.cron) return null;
   const next = nextCronDate(wakeup.cron, now);
   return next ? Math.max(1000, next.getTime() - now.getTime()) : null;

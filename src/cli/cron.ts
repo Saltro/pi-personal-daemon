@@ -51,7 +51,8 @@ function parseOptions(args: string[]): ParsedOptions {
 }
 
 function parseTarget(value: string): RuntimeCronTarget {
-  if (value === 'main' || value === 'new' || value.startsWith('session:')) return value as RuntimeCronTarget;
+  if (value === 'main' || value === 'new' || value.startsWith('session:'))
+    return value as RuntimeCronTarget;
   throw new Error(`invalid --target: ${value}`);
 }
 
@@ -67,7 +68,8 @@ function needValue(args: string[], index: number, flag: string): string {
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  for await (const chunk of process.stdin)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks).toString('utf8');
 }
 
@@ -96,10 +98,30 @@ export async function runCronCli(args: string[]): Promise<void> {
     const schedule = scheduleFromOptions(opts);
     if (!schedule) throw new Error('cron create requires --cron or --at');
     if (loadCronRegistry(config).crons[opts.id]) throw new Error(`cron already exists: ${opts.id}`);
-    console.log(JSON.stringify(putCron(config, makeRuntimeCron({ id: opts.id, prompt, schedule, target: opts.target, enabled: opts.enabled })), null, 2));
+    console.log(
+      JSON.stringify(
+        putCron(
+          config,
+          makeRuntimeCron({
+            id: opts.id,
+            prompt,
+            schedule,
+            target: opts.target,
+            enabled: opts.enabled,
+          }),
+        ),
+        null,
+        2,
+      ),
+    );
   } else if (command === 'list') {
-    const records = Object.values(loadCronRegistry(config).crons).sort((a, b) => a.id.localeCompare(b.id));
-    for (const record of records) console.log(`${record.id}\t${record.status}\t${record.enabled}\t${record.target}\t${record.nextRunAt || ''}`);
+    const records = Object.values(loadCronRegistry(config).crons).sort((a, b) =>
+      a.id.localeCompare(b.id),
+    );
+    for (const record of records)
+      console.log(
+        `${record.id}\t${record.status}\t${record.enabled}\t${record.target}\t${record.nextRunAt || ''}`,
+      );
   } else if (command === 'status') {
     const id = opts.positionals[0];
     if (!id) usage();

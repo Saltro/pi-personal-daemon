@@ -1,4 +1,4 @@
-import type { AppConfig, AgentProfile } from '../../types.js';
+import type { AgentProfile, AppConfig } from '../../types.js';
 import type { PersonalSessionRecord } from '../sessions/registry.js';
 
 export interface AgentCapabilities {
@@ -32,7 +32,12 @@ export interface AgentProcess {
 export interface AgentAdapter {
   readonly sessionCapabilities: AgentCapabilities;
   createMainRunner(config: AppConfig, profile: AgentProfile): AgentRunner;
-  sessionProcess(config: AppConfig, profile: AgentProfile, record: PersonalSessionRecord, prompt: string): AgentProcess | string;
+  sessionProcess(
+    config: AppConfig,
+    profile: AgentProfile,
+    record: PersonalSessionRecord,
+    prompt: string,
+  ): AgentProcess | string;
 }
 
 export function unsupportedCapability(backend: string, capability: string): Error {

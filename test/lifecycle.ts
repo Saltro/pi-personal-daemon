@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { daemonStatus, readDaemonPid, removeDaemonPid, stopDaemon, writeDaemonPid } from '../src/core/daemon/lifecycle.js';
+import {
+  daemonStatus,
+  readDaemonPid,
+  removeDaemonPid,
+  stopDaemon,
+  writeDaemonPid,
+} from '../src/core/daemon/lifecycle.js';
 import type { AppConfig } from '../src/types.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-daemon-lifecycle-'));
@@ -12,7 +18,14 @@ const config: AppConfig = {
   http: { enabled: false, host: '127.0.0.1', port: 0, path: '/webhook' },
   stdin: { enabled: false },
   sender: { type: 'mock', mockOutbox: path.join(tmp, 'outbox') },
-  feishu: { appId: '', appSecret: '', verificationToken: '', encryptKey: '', baseUrl: '', eventMode: 'webhook' },
+  feishu: {
+    appId: '',
+    appSecret: '',
+    verificationToken: '',
+    encryptKey: '',
+    baseUrl: '',
+    eventMode: 'webhook',
+  },
   scheduler: { enabled: false, wakeups: [] },
   runtime: { stateDir: path.join(tmp, 'state') },
 };
@@ -29,11 +42,18 @@ assert.equal(readDaemonPid(config)?.pid, process.pid);
 assert.equal(daemonStatus(config).running, true, 'the current process is alive');
 
 removeDaemonPid(config, process.pid + 1);
-assert.equal(readDaemonPid(config)?.pid, process.pid, 'mismatched removal leaves the pid file intact');
+assert.equal(
+  readDaemonPid(config)?.pid,
+  process.pid,
+  'mismatched removal leaves the pid file intact',
+);
 removeDaemonPid(config, process.pid);
 assert.equal(readDaemonPid(config), undefined, 'matching removal deletes the pid file');
 
-fs.writeFileSync(path.join(tmp, 'state', 'daemon.pid'), JSON.stringify({ pid: 999_999_999, startedAt: 'x' }));
+fs.writeFileSync(
+  path.join(tmp, 'state', 'daemon.pid'),
+  JSON.stringify({ pid: 999_999_999, startedAt: 'x' }),
+);
 const stale = daemonStatus(config);
 assert.equal(stale.running, false);
 assert.equal(stale.stalePid, 999_999_999);
@@ -47,7 +67,10 @@ fs.rmSync(path.join(tmp, 'state', 'daemon.pid'));
 
 const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
 assert.ok(child.pid);
-fs.writeFileSync(path.join(tmp, 'state', 'daemon.pid'), JSON.stringify({ pid: child.pid, startedAt: '' }));
+fs.writeFileSync(
+  path.join(tmp, 'state', 'daemon.pid'),
+  JSON.stringify({ pid: child.pid, startedAt: '' }),
+);
 const stopped = await stopDaemon(config, 5000);
 assert.equal(stopped.running, false);
 assert.equal(stopped.pid, child.pid);

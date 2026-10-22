@@ -1,15 +1,35 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
+import {
+  type AgentAdapter,
+  type AgentProcess,
+  type AgentRunner,
+  unsupportedCapability,
+} from '../../core/agents/types.js';
+import {
+  agentProcessDetached,
+  agentProcessGroupAlive,
+  signalAgentProcess,
+  waitForAgentProcessExit,
+} from '../../core/runtime/process-control.js';
 import { agentProcessEnv } from '../../core/runtime/process-paths.js';
-import { agentProcessDetached, agentProcessGroupAlive, signalAgentProcess, waitForAgentProcessExit } from '../../core/runtime/process-control.js';
-import type { AppConfig, ProcessAgentProfile } from '../../types.js';
 import type { PersonalSessionRecord } from '../../core/sessions/registry.js';
-import { unsupportedCapability, type AgentAdapter, type AgentProcess, type AgentRunner } from '../../core/agents/types.js';
+import type { AppConfig, ProcessAgentProfile } from '../../types.js';
 
-export const processCapabilities = { prompt: true, steer: false, history: false, contextUsage: false };
+export const processCapabilities = {
+  prompt: true,
+  steer: false,
+  history: false,
+  contextUsage: false,
+};
 
-export function processPrompt(config: AppConfig, profile: ProcessAgentProfile, record: PersonalSessionRecord | undefined, prompt: string): AgentProcess {
+export function processPrompt(
+  config: AppConfig,
+  profile: ProcessAgentProfile,
+  record: PersonalSessionRecord | undefined,
+  prompt: string,
+): AgentProcess {
   const sessionId = record?.sessionId || config.agent.sessionId;
-  const args = (profile.args || []).map(value => value.replaceAll('{sessionId}', sessionId));
+  const args = (profile.args || []).map((value) => value.replaceAll('{sessionId}', sessionId));
   if (profile.promptMode === 'argument') {
     let included = false;
     for (let i = 0; i < args.length; i++) {
@@ -18,7 +38,7 @@ export function processPrompt(config: AppConfig, profile: ProcessAgentProfile, r
       args[i] = args[i].replaceAll('{prompt}', prompt);
     }
     if (!included) args.push(prompt);
-  } else if (args.some(value => value.includes('{prompt}'))) {
+  } else if (args.some((value) => value.includes('{prompt}'))) {
     throw new Error('process agent {prompt} arguments require promptMode="argument"');
   }
   return {
@@ -37,14 +57,22 @@ class ProcessAgentRunner implements AgentRunner {
   private stopActive: ((error: Error) => void) | null = null;
   private closed = false;
 
-  constructor(private config: AppConfig, private profile: ProcessAgentProfile) {}
+  constructor(
+    private config: AppConfig,
+    private profile: ProcessAgentProfile,
+  ) {}
 
-  start(): void { this.closed = false; }
-  isRunning(): boolean { return this.child !== null || this.active !== null; }
+  start(): void {
+    this.closed = false;
+  }
+  isRunning(): boolean {
+    return this.child !== null || this.active !== null;
+  }
 
   promptAndWait(message: string): Promise<string> {
     if (this.closed) return Promise.reject(new Error('process agent runner is closed'));
-    if (this.isRunning()) return Promise.reject(new Error('process agent is already running or stopping'));
+    if (this.isRunning())
+      return Promise.reject(new Error('process agent is already running or stopping'));
     const spec = processPrompt(this.config, this.profile, undefined, message);
     const task = new Promise<string>((resolve, reject) => {
       const child = spawn(spec.command, spec.args, {
@@ -57,7 +85,10 @@ class ProcessAgentRunner implements AgentRunner {
       let output = '';
       let stderr = '';
       let settled = false;
-      const timer = setTimeout(() => stop(new Error('timed out waiting for process agent')), spec.timeoutMs ?? 10 * 60 * 1000);
+      const timer = setTimeout(
+        () => stop(new Error('timed out waiting for process agent')),
+        spec.timeoutMs ?? 10 * 60 * 1000,
+      );
       const stop = (error: Error) => {
         if (settled) return;
         settled = true;
@@ -70,34 +101,56 @@ class ProcessAgentRunner implements AgentRunner {
       this.stopActive = stop;
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
-      child.stdout.on('data', chunk => { output = (output + String(chunk)).slice(-4000); });
-      child.stderr.on('data', chunk => {
+      child.stdout.on('data', (chunk) => {
+        output = (output + String(chunk)).slice(-4000);
+      });
+      child.stderr.on('data', (chunk) => {
         stderr = (stderr + String(chunk)).slice(-4000);
         process.stderr.write(`[agent-process] ${chunk}`);
       });
-      child.on('error', error => stop(new Error(`process agent startup failed: ${error.message}`)));
-      child.stdin.on('error', error => stop(new Error(`process agent stdin failed: ${error.message}`)));
-      child.stdout.on('error', error => stop(error));
-      child.stderr.on('error', error => stop(error));
+      child.on('error', (error) =>
+        stop(new Error(`process agent startup failed: ${error.message}`)),
+      );
+      child.stdin.on('error', (error) =>
+        stop(new Error(`process agent stdin failed: ${error.message}`)),
+      );
+      child.stdout.on('error', (error) => stop(error));
+      child.stderr.on('error', (error) => stop(error));
       child.on('exit', () => {
         // A leader may exit before its descendants close inherited stdout/stderr.
-        if (agentProcessGroupAlive(child)) stop(new Error('process agent exited with descendant processes still running'));
+        if (agentProcessGroupAlive(child))
+          stop(new Error('process agent exited with descendant processes still running'));
         else signalAgentProcess(child, 'SIGKILL');
       });
       child.on('close', (code, signal) => {
         clearTimeout(timer);
         signalAgentProcess(child, 'SIGKILL');
-        void waitForAgentProcessExit(child).then(stopped => {
-          if (stopped && this.child === child) { this.child = null; this.stopActive = null; }
+        void waitForAgentProcessExit(child).then((stopped) => {
+          if (stopped && this.child === child) {
+            this.child = null;
+            this.stopActive = null;
+          }
           if (settled) return;
           settled = true;
-          if (!stopped) reject(new Error('process agent termination could not be confirmed; runner remains busy'));
-          else code === 0 ? resolve(output.trim()) : reject(new Error(`process agent exited code=${code} signal=${signal}${stderr ? `: ${stderr.trim()}` : ''}`));
+          if (!stopped)
+            reject(
+              new Error('process agent termination could not be confirmed; runner remains busy'),
+            );
+          else
+            code === 0
+              ? resolve(output.trim())
+              : reject(
+                  new Error(
+                    `process agent exited code=${code} signal=${signal}${stderr ? `: ${stderr.trim()}` : ''}`,
+                  ),
+                );
         });
       });
       child.stdin.end(spec.stdin);
     });
-    const active = task.finally(() => { if (this.active === active) this.active = null; });
+    const active = task.finally(() => {
+      if (this.active === active) this.active = null;
+    });
     this.active = active;
     return active;
   }
@@ -125,13 +178,25 @@ class ProcessAgentRunner implements AgentRunner {
     }
   }
 
-  steer(_message: string): ReturnType<AgentRunner['steer']> { return Promise.reject(unsupportedCapability('process', 'steer')); }
-  getState(): Promise<unknown> { return Promise.resolve({ backend: 'process', isRunning: this.isRunning() }); }
-  getMessages(): Promise<unknown> { return Promise.reject(unsupportedCapability('process', 'native history')); }
-  getContextUsage(): ReturnType<AgentRunner['getContextUsage']> {
-    return Promise.resolve({ text: 'Context usage unavailable', source: 'process backend does not support context usage' });
+  steer(_message: string): ReturnType<AgentRunner['steer']> {
+    return Promise.reject(unsupportedCapability('process', 'steer'));
   }
-  close(): void { this.closed = true; this.stopActive?.(new Error('process agent runner closed')); }
+  getState(): Promise<unknown> {
+    return Promise.resolve({ backend: 'process', isRunning: this.isRunning() });
+  }
+  getMessages(): Promise<unknown> {
+    return Promise.reject(unsupportedCapability('process', 'native history'));
+  }
+  getContextUsage(): ReturnType<AgentRunner['getContextUsage']> {
+    return Promise.resolve({
+      text: 'Context usage unavailable',
+      source: 'process backend does not support context usage',
+    });
+  }
+  close(): void {
+    this.closed = true;
+    this.stopActive?.(new Error('process agent runner closed'));
+  }
 }
 
 export const processAdapter: AgentAdapter = {

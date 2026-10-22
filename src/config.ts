@@ -58,7 +58,9 @@ function boolEnv(value: string | undefined, fallback: boolean): boolean {
 }
 
 export function loadConfig(): AppConfig {
-  const configPath = path.resolve(process.env.RETRIEVER_CONFIG || path.join(process.cwd(), 'config.json'));
+  const configPath = path.resolve(
+    process.env.RETRIEVER_CONFIG || path.join(process.cwd(), 'config.json'),
+  );
   let fileConfig: Partial<AppConfig> = {};
   if (fs.existsSync(configPath)) {
     fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Partial<AppConfig>;
@@ -70,19 +72,27 @@ export function loadConfig(): AppConfig {
       cwd: process.env.RETRIEVER_AGENT_CWD,
       piBin: process.env.PI_BIN,
       sessionDir: process.env.RETRIEVER_AGENT_SESSION_DIR,
-      extraArgs: process.env.RETRIEVER_AGENT_EXTRA_ARGS ? process.env.RETRIEVER_AGENT_EXTRA_ARGS.split(' ').filter(Boolean) : undefined,
-      mock: process.env.RETRIEVER_AGENT_MOCK ? boolEnv(process.env.RETRIEVER_AGENT_MOCK, false) : undefined,
+      extraArgs: process.env.RETRIEVER_AGENT_EXTRA_ARGS
+        ? process.env.RETRIEVER_AGENT_EXTRA_ARGS.split(' ').filter(Boolean)
+        : undefined,
+      mock: process.env.RETRIEVER_AGENT_MOCK
+        ? boolEnv(process.env.RETRIEVER_AGENT_MOCK, false)
+        : undefined,
       profile: process.env.RETRIEVER_AGENT_PROFILE,
     },
     channel: { type: process.env.RETRIEVER_CHANNEL },
     http: {
-      enabled: process.env.RETRIEVER_HTTP_ENABLED ? boolEnv(process.env.RETRIEVER_HTTP_ENABLED, true) : undefined,
+      enabled: process.env.RETRIEVER_HTTP_ENABLED
+        ? boolEnv(process.env.RETRIEVER_HTTP_ENABLED, true)
+        : undefined,
       host: process.env.RETRIEVER_HTTP_HOST,
       port: process.env.RETRIEVER_HTTP_PORT ? Number(process.env.RETRIEVER_HTTP_PORT) : undefined,
       path: process.env.RETRIEVER_HTTP_PATH,
     },
     stdin: {
-      enabled: process.env.RETRIEVER_STDIN_ENABLED ? boolEnv(process.env.RETRIEVER_STDIN_ENABLED, true) : undefined,
+      enabled: process.env.RETRIEVER_STDIN_ENABLED
+        ? boolEnv(process.env.RETRIEVER_STDIN_ENABLED, true)
+        : undefined,
     },
     sender: {
       type: process.env.RETRIEVER_SENDER,
@@ -97,7 +107,9 @@ export function loadConfig(): AppConfig {
       eventMode: process.env.FEISHU_EVENT_MODE as 'ws' | 'webhook' | 'both' | undefined,
     },
     scheduler: {
-      enabled: process.env.RETRIEVER_SCHEDULER_ENABLED ? boolEnv(process.env.RETRIEVER_SCHEDULER_ENABLED, false) : undefined,
+      enabled: process.env.RETRIEVER_SCHEDULER_ENABLED
+        ? boolEnv(process.env.RETRIEVER_SCHEDULER_ENABLED, false)
+        : undefined,
     },
     runtime: {
       contextFile: process.env.RETRIEVER_CONTEXT_FILE,
@@ -105,20 +117,29 @@ export function loadConfig(): AppConfig {
     },
   };
 
-  const config = mergeConfig(mergeConfig(DEFAULT_CONFIG, fileConfig), stripUndefined(envConfig) as Partial<AppConfig>);
+  const config = mergeConfig(
+    mergeConfig(DEFAULT_CONFIG, fileConfig),
+    stripUndefined(envConfig) as Partial<AppConfig>,
+  );
   const baseDir = path.dirname(configPath);
   config.runtime.configPath = configPath;
   config.agent.cwd = path.resolve(baseDir, config.agent.cwd);
-  if (config.agent.sessionDir) config.agent.sessionDir = path.resolve(baseDir, config.agent.sessionDir);
-  if (config.agent.piBin.includes(path.sep)) config.agent.piBin = path.resolve(baseDir, config.agent.piBin);
-  if (config.runtime.stateDir) config.runtime.stateDir = path.resolve(baseDir, config.runtime.stateDir);
-  if (config.runtime.contextFile) config.runtime.contextFile = path.resolve(baseDir, config.runtime.contextFile);
+  if (config.agent.sessionDir)
+    config.agent.sessionDir = path.resolve(baseDir, config.agent.sessionDir);
+  if (config.agent.piBin.includes(path.sep))
+    config.agent.piBin = path.resolve(baseDir, config.agent.piBin);
+  if (config.runtime.stateDir)
+    config.runtime.stateDir = path.resolve(baseDir, config.runtime.stateDir);
+  if (config.runtime.contextFile)
+    config.runtime.contextFile = path.resolve(baseDir, config.runtime.contextFile);
   config.sender.mockOutbox = path.resolve(baseDir, config.sender.mockOutbox);
   for (const profile of Object.values(config.agentProfiles || {})) {
     if (profile.cwd) profile.cwd = path.resolve(baseDir, profile.cwd);
     if (profile.sessionDir) profile.sessionDir = path.resolve(baseDir, profile.sessionDir);
-    if (profile.backend === 'pi' && profile.piBin?.includes(path.sep)) profile.piBin = path.resolve(baseDir, profile.piBin);
-    if (profile.backend === 'process' && profile.command?.includes(path.sep)) profile.command = path.resolve(baseDir, profile.command);
+    if (profile.backend === 'pi' && profile.piBin?.includes(path.sep))
+      profile.piBin = path.resolve(baseDir, profile.piBin);
+    if (profile.backend === 'process' && profile.command?.includes(path.sep))
+      profile.command = path.resolve(baseDir, profile.command);
   }
   return config;
 }

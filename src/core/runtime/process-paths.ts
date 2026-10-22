@@ -24,7 +24,9 @@ export function selfPackageRoot(): string {
     try {
       const entryDirectory = path.dirname(fs.realpathSync(process.argv[1]));
       return findPackageRoot(entryDirectory);
-    } catch { /* Programmatic callers keep the build-time root. */ }
+    } catch {
+      /* Programmatic callers keep the build-time root. */
+    }
   }
   return packageRoot;
 }
@@ -35,7 +37,9 @@ export function helperBinDirectory(): string {
     try {
       const entryDirectory = path.dirname(fs.realpathSync(process.argv[1]));
       if (fs.existsSync(path.join(entryDirectory, 'session-watcher.js'))) return entryDirectory;
-    } catch { /* Programmatic callers use the package-relative fallback. */ }
+    } catch {
+      /* Programmatic callers use the package-relative fallback. */
+    }
   }
   return buildDirectory;
 }
@@ -56,7 +60,8 @@ export function selfCommand(args: string[]): { command: string; args: string[] }
   if (!entry) throw new Error('cannot locate the daemon entry point');
   if (entry.endsWith('.ts')) {
     const loader = path.join(packageRoot, 'node_modules/tsx/dist/loader.mjs');
-    if (fs.existsSync(loader)) return { command: process.execPath, args: ['--import', loader, entry, ...args] };
+    if (fs.existsSync(loader))
+      return { command: process.execPath, args: ['--import', loader, entry, ...args] };
   }
   return { command: process.execPath, args: [...process.execArgv, entry, ...args] };
 }
@@ -65,7 +70,11 @@ export function absoluteConfigPath(config: AppConfig): string {
   return path.resolve(config.runtime.configPath || process.env.RETRIEVER_CONFIG || 'config.json');
 }
 
-export function agentProcessEnv(config: AppConfig, record?: PersonalSessionRecord, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+export function agentProcessEnv(
+  config: AppConfig,
+  record?: PersonalSessionRecord,
+  extra: Record<string, string> = {},
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...extra,

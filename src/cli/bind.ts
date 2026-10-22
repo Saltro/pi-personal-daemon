@@ -1,5 +1,9 @@
 import { loadConfig } from '../config.js';
-import { bindingPath, readFeishuChatBinding, writeFeishuChatBinding } from '../core/state/binding.js';
+import {
+  bindingPath,
+  readFeishuChatBinding,
+  writeFeishuChatBinding,
+} from '../core/state/binding.js';
 
 function usage(): never {
   console.error(`Usage:
@@ -32,7 +36,9 @@ export async function runBindCli(args: string[]): Promise<void> {
   }
   if (command === 'status') {
     const binding = readFeishuChatBinding(config);
-    console.log(JSON.stringify({ bound: Boolean(binding), binding, path: bindingPath(config) }, null, 2));
+    console.log(
+      JSON.stringify({ bound: Boolean(binding), binding, path: bindingPath(config) }, null, 2),
+    );
     return;
   }
   usage();

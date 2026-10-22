@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import type { AppConfig, InboundEvent } from '../../types.js';
 import { getStateDb, stateTransaction } from '../state/db.js';
 import { stateDir } from '../state/paths.js';
-import type { PersonalSessionRecord, ParentCallback } from './registry.js';
-import type { AppConfig, InboundEvent } from '../../types.js';
+import type { ParentCallback, PersonalSessionRecord } from './registry.js';
 
 export type ParentCallbackNotice = ParentCompletionNotice | ParentReturnNotice;
 
@@ -61,7 +61,9 @@ export function detectParentCallback(config: AppConfig): ParentCallback | undefi
   };
 }
 
-export function makeParentNotification(record: PersonalSessionRecord): ParentCompletionNotice | undefined {
+export function makeParentNotification(
+  record: PersonalSessionRecord,
+): ParentCompletionNotice | undefined {
   if (!record.parentCallback) return undefined;
   return {
     type: 'session.completed',
@@ -83,12 +85,20 @@ export function makeParentNotification(record: PersonalSessionRecord): ParentCom
   };
 }
 
-export function writeParentNotification(config: AppConfig, record: PersonalSessionRecord): string | undefined {
+export function writeParentNotification(
+  config: AppConfig,
+  record: PersonalSessionRecord,
+): string | undefined {
   const notice = makeParentNotification(record);
   return notice ? persistParentNotification(config, notice) : undefined;
 }
 
-export function writeParentReturnNotification(config: AppConfig, parent: ParentCallback, text: string, childSessionId?: string): string {
+export function writeParentReturnNotification(
+  config: AppConfig,
+  parent: ParentCallback,
+  text: string,
+  childSessionId?: string,
+): string {
   const notice: ParentReturnNotice = {
     type: 'session.return',
     id: `session_return_${randomUUID()}`,
@@ -103,30 +113,43 @@ export function writeParentReturnNotification(config: AppConfig, parent: ParentC
 export const MAX_PARENT_NOTIFICATION_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000;
 
-export function claimParentNotifications(config: AppConfig, limit?: number): ParentCallbackNotice[] {
-  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0)) throw new Error('parent notification claim limit must be a positive integer');
+export function claimParentNotifications(
+  config: AppConfig,
+  limit?: number,
+): ParentCallbackNotice[] {
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0))
+    throw new Error('parent notification claim limit must be a positive integer');
   const db = getStateDb(config);
   return stateTransaction(db, () => {
     const now = new Date().toISOString();
-    const rows = db.prepare(`SELECT id, payload FROM parent_notifications
+    const rows = db
+      .prepare(`SELECT id, payload FROM parent_notifications
       WHERE status = 'pending' AND attempts < ? AND availableAt <= ?
       ORDER BY createdAt, id ${limit === undefined ? '' : 'LIMIT ?'}`)
       .all(MAX_PARENT_NOTIFICATION_ATTEMPTS, now, ...(limit === undefined ? [] : [limit]));
     // Decode first so an invalid stored payload cannot leave partially claimed rows.
-    const notices = rows.map(row => JSON.parse(String(row.payload)) as ParentCallbackNotice);
-    const claim = db.prepare("UPDATE parent_notifications SET status='claimed', attempts=attempts+1, claimedAt=? WHERE id=? AND status='pending'");
+    const notices = rows.map((row) => JSON.parse(String(row.payload)) as ParentCallbackNotice);
+    const claim = db.prepare(
+      "UPDATE parent_notifications SET status='claimed', attempts=attempts+1, claimedAt=? WHERE id=? AND status='pending'",
+    );
     for (const row of rows) claim.run(now, String(row.id));
     return notices;
   });
 }
 
 export function acknowledgeParentNotification(config: AppConfig, id: string): void {
-  getStateDb(config).prepare("UPDATE parent_notifications SET status='delivered', deliveredAt=?, claimedAt=NULL, lastError=NULL WHERE id=? AND status='claimed'").run(new Date().toISOString(), id);
+  getStateDb(config)
+    .prepare(
+      "UPDATE parent_notifications SET status='delivered', deliveredAt=?, claimedAt=NULL, lastError=NULL WHERE id=? AND status='claimed'",
+    )
+    .run(new Date().toISOString(), id);
 }
 
 export function releaseParentNotification(config: AppConfig, id: string): void {
   const db = getStateDb(config);
-  stateTransaction(db, () => releaseClaim(db, id, new Date(), 'Callback processing failed; released for retry.'));
+  stateTransaction(db, () =>
+    releaseClaim(db, id, new Date(), 'Callback processing failed; released for retry.'),
+  );
 }
 
 export function recoverParentNotifications(config: AppConfig): number {
@@ -136,21 +159,37 @@ export function recoverParentNotifications(config: AppConfig): number {
   return stateTransaction(db, () => {
     const rows = db.prepare("SELECT id FROM parent_notifications WHERE status='claimed'").all();
     const now = new Date();
-    for (const row of rows) releaseClaim(db, String(row.id), now, 'Callback delivery interrupted by daemon restart.');
+    for (const row of rows)
+      releaseClaim(db, String(row.id), now, 'Callback delivery interrupted by daemon restart.');
     return rows.length;
   });
 }
 
-function releaseClaim(db: ReturnType<typeof getStateDb>, id: string, now: Date, reason: string): void {
-  const row = db.prepare("SELECT attempts FROM parent_notifications WHERE id=? AND status='claimed'").get(id);
+function releaseClaim(
+  db: ReturnType<typeof getStateDb>,
+  id: string,
+  now: Date,
+  reason: string,
+): void {
+  const row = db
+    .prepare("SELECT attempts FROM parent_notifications WHERE id=? AND status='claimed'")
+    .get(id);
   if (!row) return;
   const attempts = Number(row.attempts);
   const exhausted = attempts >= MAX_PARENT_NOTIFICATION_ATTEMPTS;
-  const availableAt = new Date(now.getTime() + RETRY_DELAY_MS * 2 ** Math.max(0, attempts - 1)).toISOString();
-  db.prepare('UPDATE parent_notifications SET status=?, availableAt=?, claimedAt=NULL, lastError=? WHERE id=? AND status=?').run(
-    exhausted ? 'failed' : 'pending', availableAt,
-    exhausted ? `${reason} Retry limit (${MAX_PARENT_NOTIFICATION_ATTEMPTS}) exhausted; retained for inspection.` : reason,
-    id, 'claimed',
+  const availableAt = new Date(
+    now.getTime() + RETRY_DELAY_MS * 2 ** Math.max(0, attempts - 1),
+  ).toISOString();
+  db.prepare(
+    'UPDATE parent_notifications SET status=?, availableAt=?, claimedAt=NULL, lastError=? WHERE id=? AND status=?',
+  ).run(
+    exhausted ? 'failed' : 'pending',
+    availableAt,
+    exhausted
+      ? `${reason} Retry limit (${MAX_PARENT_NOTIFICATION_ATTEMPTS}) exhausted; retained for inspection.`
+      : reason,
+    id,
+    'claimed',
   );
 }
 
@@ -163,7 +202,8 @@ export function drainParentNotifications(config: AppConfig): ParentCallbackNotic
 }
 
 export function noticeToInbound(notice: ParentCallbackNotice): InboundEvent {
-  const text = notice.type === 'session.return' ? returnNoticeText(notice) : completionNoticeText(notice);
+  const text =
+    notice.type === 'session.return' ? returnNoticeText(notice) : completionNoticeText(notice);
   return {
     id: notice.id,
     source: 'session-callback',
@@ -186,7 +226,9 @@ function completionNoticeText(notice: ParentCompletionNotice): string {
     notice.child.lastResult ? `last_result:\n${notice.child.lastResult.slice(-3000)}` : undefined,
     '',
     'Decide the next action: send a visible reply, inspect child history, continue the child session, or record the result.',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function returnNoticeText(notice: ParentReturnNotice): string {
@@ -197,14 +239,21 @@ function returnNoticeText(notice: ParentReturnNotice): string {
 }
 
 export function persistParentNotification(config: AppConfig, notice: ParentCallbackNotice): string {
-  getStateDb(config).prepare('INSERT INTO parent_notifications(id, createdAt, payload, availableAt) VALUES (?, ?, ?, ?)')
+  getStateDb(config)
+    .prepare(
+      'INSERT INTO parent_notifications(id, createdAt, payload, availableAt) VALUES (?, ?, ?, ?)',
+    )
     .run(notice.id, notice.createdAt, JSON.stringify(notice), notice.createdAt);
   return notice.id;
 }
 
 export function listParentNotifications(config: AppConfig): ParentCallbackNotice[] {
-  return getStateDb(config).prepare("SELECT payload FROM parent_notifications WHERE status IN ('pending','claimed') ORDER BY createdAt,id")
-    .all().map(row => JSON.parse(String(row.payload)) as ParentCallbackNotice);
+  return getStateDb(config)
+    .prepare(
+      "SELECT payload FROM parent_notifications WHERE status IN ('pending','claimed') ORDER BY createdAt,id",
+    )
+    .all()
+    .map((row) => JSON.parse(String(row.payload)) as ParentCallbackNotice);
 }
 
 function safeName(value: string): string {

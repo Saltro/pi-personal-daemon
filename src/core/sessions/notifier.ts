@@ -1,8 +1,11 @@
-import { writeParentNotification } from './callbacks.js';
-import { putSession, type PersonalSessionRecord } from './registry.js';
 import type { AppConfig } from '../../types.js';
+import { writeParentNotification } from './callbacks.js';
+import { type PersonalSessionRecord, putSession } from './registry.js';
 
-export async function returnSessionCompletion(config: AppConfig, record: PersonalSessionRecord): Promise<PersonalSessionRecord> {
+export async function returnSessionCompletion(
+  config: AppConfig,
+  record: PersonalSessionRecord,
+): Promise<PersonalSessionRecord> {
   if (!record.autoReturn) return record;
   const file = writeParentNotification(config, record);
   if (file) record.parentNotificationPath = file;

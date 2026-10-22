@@ -35,13 +35,19 @@ export function parseCronExpression(expression: string): CronSchedule | null {
     hour: parseCronField(hour, 0, 23),
     dayOfMonth: parseCronField(dayOfMonth, 1, 31),
     month: parseCronField(month, 1, 12),
-    dayOfWeek: parseCronField(dayOfWeek, 0, 7, value => value === 7 ? 0 : value),
+    dayOfWeek: parseCronField(dayOfWeek, 0, 7, (value) => (value === 7 ? 0 : value)),
   };
-  if (!parsed.minute || !parsed.hour || !parsed.dayOfMonth || !parsed.month || !parsed.dayOfWeek) return null;
+  if (!parsed.minute || !parsed.hour || !parsed.dayOfMonth || !parsed.month || !parsed.dayOfWeek)
+    return null;
   return parsed as CronSchedule;
 }
 
-function parseCronField(expr: string, min: number, max: number, normalize: (value: number) => number = value => value): CronField | null {
+function parseCronField(
+  expr: string,
+  min: number,
+  max: number,
+  normalize: (value: number) => number = (value) => value,
+): CronField | null {
   if (!expr) return null;
   const values = new Set<number>();
   const parts = expr.split(',');
@@ -67,7 +73,12 @@ function parseCronField(expr: string, min: number, max: number, normalize: (valu
   return values.size ? { wildcard, values } : null;
 }
 
-function addRange(values: Set<number>, min: number, max: number, normalize: (value: number) => number): void {
+function addRange(
+  values: Set<number>,
+  min: number,
+  max: number,
+  normalize: (value: number) => number,
+): void {
   for (let value = min; value <= max; value++) values.add(normalize(value));
 }
 

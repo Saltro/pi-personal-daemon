@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { stateDir } from '../state/paths.js';
 import type { AppConfig } from '../../types.js';
+import { stateDir } from '../state/paths.js';
 
 interface DaemonPidFile {
   pid: number;
@@ -40,17 +40,24 @@ export function readDaemonPid(config: AppConfig): DaemonPidFile | undefined {
   if (!fs.existsSync(file)) return undefined;
   try {
     const value = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<DaemonPidFile>;
-    if (!Number.isInteger(value.pid) || value.pid! <= 0) throw new Error('invalid pid');
-    return { pid: value.pid!, startedAt: typeof value.startedAt === 'string' ? value.startedAt : '' };
+    const { pid } = value;
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0)
+      throw new Error('invalid pid');
+    return {
+      pid,
+      startedAt: typeof value.startedAt === 'string' ? value.startedAt : '',
+    };
   } catch (error) {
-    throw new Error(`malformed daemon pid file ${file}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `malformed daemon pid file ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
 export function writeDaemonPid(config: AppConfig): DaemonPidFile {
   const record: DaemonPidFile = { pid: process.pid, startedAt: new Date().toISOString() };
   fs.mkdirSync(stateDir(config), { recursive: true });
-  fs.writeFileSync(daemonPidPath(config), JSON.stringify(record, null, 2) + '\n', { mode: 0o600 });
+  fs.writeFileSync(daemonPidPath(config), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   return record;
 }
 
@@ -67,7 +74,11 @@ export function removeDaemonPid(config: AppConfig, pid?: number): void {
 }
 
 export function daemonStatus(config: AppConfig): DaemonStatus {
-  const base = { stateDir: stateDir(config), pidPath: daemonPidPath(config), logPath: daemonLogPath(config) };
+  const base = {
+    stateDir: stateDir(config),
+    pidPath: daemonPidPath(config),
+    logPath: daemonLogPath(config),
+  };
   const record = readDaemonPid(config);
   if (!record) return { running: false, ...base };
   if (!isProcessAlive(record.pid)) return { running: false, stalePid: record.pid, ...base };
@@ -87,19 +98,26 @@ export async function stopDaemon(config: AppConfig, timeoutMs = 10_000): Promise
     }
     await delay(100);
   }
-  throw new Error(`daemon pid ${pid} did not exit within ${timeoutMs}ms; inspect ${status.logPath}`);
+  throw new Error(
+    `daemon pid ${pid} did not exit within ${timeoutMs}ms; inspect ${status.logPath}`,
+  );
 }
 
-export async function waitForDaemonStart(config: AppConfig, timeoutMs = 10_000): Promise<DaemonStatus> {
+export async function waitForDaemonStart(
+  config: AppConfig,
+  timeoutMs = 10_000,
+): Promise<DaemonStatus> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const status = daemonStatus(config);
     if (status.running) return status;
     await delay(100);
   }
-  throw new Error(`daemon did not report a live pid within ${timeoutMs}ms; inspect ${daemonLogPath(config)}`);
+  throw new Error(
+    `daemon did not report a live pid within ${timeoutMs}ms; inspect ${daemonLogPath(config)}`,
+  );
 }
 
 function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

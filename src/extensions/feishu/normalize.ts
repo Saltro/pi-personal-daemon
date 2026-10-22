@@ -78,8 +78,16 @@ function messageText(message: FeishuMessage): string {
   }
   if (message.message_type === 'post' && typeof message.content === 'string') {
     try {
-      const parsed = JSON.parse(message.content) as { title?: string; content?: Array<Array<{ text?: string }>> };
-      const text = parsed.content?.flat().map(item => item.text).filter(Boolean).join('') || '';
+      const parsed = JSON.parse(message.content) as {
+        title?: string;
+        content?: Array<Array<{ text?: string }>>;
+      };
+      const text =
+        parsed.content
+          ?.flat()
+          .map((item) => item.text)
+          .filter(Boolean)
+          .join('') || '';
       return [parsed.title, text].filter(Boolean).join('\n') || message.content;
     } catch {
       return message.content;

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import './extensions/index.js';
-import { loadConfig } from './config.js';
 import { runBindCli } from './cli/bind.js';
 import { runCronCli } from './cli/cron.js';
 import { runDaemonCli } from './cli/daemon.js';
@@ -8,6 +7,7 @@ import { runReturnCli } from './cli/return.js';
 import { runSendCli } from './cli/send.js';
 import { runSessionsCli } from './cli/sessions.js';
 import { runUpdateCli, runVersionCli } from './cli/update.js';
+import { loadConfig } from './config.js';
 import { PersonalDaemon } from './core/daemon/daemon.js';
 import { daemonStatus, removeDaemonPid, writeDaemonPid } from './core/daemon/lifecycle.js';
 
@@ -58,7 +58,7 @@ function runForegroundDaemon(): void {
   }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error(`[retriever] ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

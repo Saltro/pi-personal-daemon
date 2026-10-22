@@ -39,10 +39,12 @@
   "scripts": {
     "build": "rsbuild build && node scripts/fix-bin.js",
     "typecheck": "tsc --noEmit",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "smoke": "tsx test/smoke.ts",
-    "test": "pnpm run typecheck && pnpm run build && pnpm run test:unit && pnpm run smoke",
+    "test": "pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test:unit && pnpm run smoke",
     "test:unit": "tsx test/storage.ts && tsx test/runner.ts && tsx test/scheduler.ts && tsx test/agents.ts && tsx test/sessions.ts && tsx test/channels.ts && tsx test/lifecycle.ts && tsx test/update.ts"
   },
   "engines": {
@@ -52,6 +54,7 @@
     "@larksuiteoapi/node-sdk": "^1.76.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.2",
     "@rsbuild/core": "latest",
     "@types/node": "latest",
     "tsx": "latest",

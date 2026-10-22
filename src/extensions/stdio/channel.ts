@@ -5,7 +5,7 @@ import type { AppConfig, InboundEvent, OutboundReply, Sender } from '../../types
 class StdioSender implements Sender {
   async send(reply: OutboundReply): Promise<{ ok: true }> {
     await new Promise<void>((resolve, reject) => {
-      process.stdout.write(`${reply.text}\n`, error => error ? reject(error) : resolve());
+      process.stdout.write(`${reply.text}\n`, (error) => (error ? reject(error) : resolve()));
     });
     return { ok: true };
   }
@@ -27,6 +27,10 @@ export class StdioChannel implements ChannelAdapter {
     }
   }
 
-  shouldDebounce(): boolean { return false; }
-  dedupeKey(): string | null { return null; }
+  shouldDebounce(): boolean {
+    return false;
+  }
+  dedupeKey(): string | null {
+    return null;
+  }
 }

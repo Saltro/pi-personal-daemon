@@ -1,13 +1,19 @@
-import { toAgentPrompt } from '../events.js';
-import { createChannelAdapter, type ChannelAdapter } from '../channels/registry.js';
-import { acknowledgeParentNotification, claimParentNotifications, noticeToInbound, recoverParentNotifications, releaseParentNotification } from '../sessions/callbacks.js';
-import { createMainAgentRunner, type AgentRunner } from '../agents/registry.js';
-import { readCurrentContext, recordContextUsage, writeCurrentContext } from '../state/context.js';
-import { RuntimeCronDispatcher } from '../cron/dispatch.js';
-import { startStdinReceiver } from '../input/stdin.js';
-import { WakeupScheduler } from '../cron/scheduler.js';
 import type { Interface } from 'node:readline';
 import type { AppConfig, InboundEvent } from '../../types.js';
+import { type AgentRunner, createMainAgentRunner } from '../agents/registry.js';
+import { type ChannelAdapter, createChannelAdapter } from '../channels/registry.js';
+import { RuntimeCronDispatcher } from '../cron/dispatch.js';
+import { WakeupScheduler } from '../cron/scheduler.js';
+import { toAgentPrompt } from '../events.js';
+import { startStdinReceiver } from '../input/stdin.js';
+import {
+  acknowledgeParentNotification,
+  claimParentNotifications,
+  noticeToInbound,
+  recoverParentNotifications,
+  releaseParentNotification,
+} from '../sessions/callbacks.js';
+import { readCurrentContext, recordContextUsage, writeCurrentContext } from '../state/context.js';
 
 export interface DaemonOptions {
   runner?: AgentRunner;
@@ -37,19 +43,23 @@ export class PersonalDaemon {
   private debounceTimer: NodeJS.Timeout | null = null;
   private debouncedMessages: Array<{ event: InboundEvent; dedupeKey: string | null }> = [];
 
-  constructor(private config: AppConfig, options: DaemonOptions = {}) {
+  constructor(
+    private config: AppConfig,
+    options: DaemonOptions = {},
+  ) {
     this.runner = options.runner || createMainAgentRunner(config);
     this.channel = options.channel || createChannelAdapter(config);
     this.debounceMs = options.debounceMs ?? USER_MESSAGE_DEBOUNCE_MS;
-    this.scheduler = new WakeupScheduler(config, event => this.enqueue(event));
-    this.runtimeCron = new RuntimeCronDispatcher(config, event => this.enqueue(event));
+    this.scheduler = new WakeupScheduler(config, (event) => this.enqueue(event));
+    this.runtimeCron = new RuntimeCronDispatcher(config, (event) => this.enqueue(event));
   }
 
   start(): void {
     this.runner.start();
-    this.channel.start(event => this.enqueue(event))
-      .catch(error => console.error(`[channel] ${error.stack || error}`));
-    this.stdinReceiver = startStdinReceiver(this.config, event => this.enqueue(event));
+    this.channel
+      .start((event) => this.enqueue(event))
+      .catch((error) => console.error(`[channel] ${error.stack || error}`));
+    this.stdinReceiver = startStdinReceiver(this.config, (event) => this.enqueue(event));
     this.scheduler.start();
     this.runtimeCron.start();
     this.startCallbackPoller();
@@ -70,13 +80,16 @@ export class PersonalDaemon {
     return this.enqueueImmediate(event, dedupeKey);
   }
 
-  private enqueueImmediate(event: InboundEvent, dedupeKeys: string | string[] | null = null): Promise<void> {
+  private enqueueImmediate(
+    event: InboundEvent,
+    dedupeKeys: string | string[] | null = null,
+  ): Promise<void> {
     const keys = Array.isArray(dedupeKeys) ? dedupeKeys : dedupeKeys ? [dedupeKeys] : [];
     const task = this.queue.then(async () => {
       if (this.stopped) throw new Error('Daemon stopped before event delivery');
       await this.handleEvent(event);
     });
-    this.queue = task.catch(error => {
+    this.queue = task.catch((error) => {
       for (const key of keys) this.seenInbound.delete(key);
       console.error(`[daemon] ${error.stack || error}`);
     });
@@ -91,19 +104,23 @@ export class PersonalDaemon {
     this.debouncedMessages.push({ event, dedupeKey });
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => this.flushDebouncedMessages(), this.debounceMs);
-    console.error(`[daemon] message debounced event=${event.id} batch_size=${this.debouncedMessages.length}`);
+    console.error(
+      `[daemon] message debounced event=${event.id} batch_size=${this.debouncedMessages.length}`,
+    );
   }
 
   private flushDebouncedMessages(): void {
     this.debounceTimer = null;
     const batch = this.debouncedMessages.splice(0);
     if (!batch.length) return;
-    const event = aggregateInboundMessages(batch.map(item => item.event));
-    const dedupeKeys = batch.map(item => item.dedupeKey).filter((key): key is string => !!key);
+    const event = aggregateInboundMessages(batch.map((item) => item.event));
+    const dedupeKeys = batch.map((item) => item.dedupeKey).filter((key): key is string => !!key);
     if (this.runner.isRunning() && this.runner.capabilities.steer) {
-      this.steerActiveRun(event).catch(error => {
+      this.steerActiveRun(event).catch((error) => {
         for (const key of dedupeKeys) this.seenInbound.delete(key);
-        console.error(`[daemon] steer failed event=${event.id}: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(
+          `[daemon] steer failed event=${event.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
         this.enqueueImmediate(event);
       });
       return;
@@ -118,18 +135,30 @@ export class PersonalDaemon {
     writeCurrentContext(this.config, event);
     const response = await this.runner.steer(toAgentPrompt(event, this.channel.label));
     console.error(`[daemon] prompt steered event=${event.id} disposition=${response.disposition}`);
-    this.runner.waitForSettled().then(async () => {
-      await this.refreshContextUsage(event.id);
-      const context = readCurrentContext(this.config);
-      console.error(`[daemon] prompt done event=${event.id} send_count=${context.sendCount || 0}`);
-      if (!context.sendCount) console.error(`[daemon] reply not sent event=${event.id} reason=agent_cli_not_called`);
-      await this.addReaction(event, COMPLETION_REACTION, 'completion');
-    }).catch(error => console.error(`[daemon] steer completion warning event=${event.id}: ${error instanceof Error ? error.message : String(error)}`));
+    this.runner
+      .waitForSettled()
+      .then(async () => {
+        await this.refreshContextUsage(event.id);
+        const context = readCurrentContext(this.config);
+        console.error(
+          `[daemon] prompt done event=${event.id} send_count=${context.sendCount || 0}`,
+        );
+        if (!context.sendCount)
+          console.error(`[daemon] reply not sent event=${event.id} reason=agent_cli_not_called`);
+        await this.addReaction(event, COMPLETION_REACTION, 'completion');
+      })
+      .catch((error) =>
+        console.error(
+          `[daemon] steer completion warning event=${event.id}: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
   }
 
   async handleEvent(event: InboundEvent): Promise<void> {
     if (!event.text?.trim()) return;
-    console.error(`[daemon] event ${event.id} kind=${event.kind} chat=${event.chatId} text_chars=${event.text.length}`);
+    console.error(
+      `[daemon] event ${event.id} kind=${event.kind} chat=${event.chatId} text_chars=${event.text.length}`,
+    );
     this.channel.bindInbound(event);
     await this.addReaction(event, PROCESSING_REACTION, 'processing');
     writeCurrentContext(this.config, event);
@@ -140,7 +169,8 @@ export class PersonalDaemon {
     await this.refreshContextUsage(event.id);
     const context = readCurrentContext(this.config);
     console.error(`[daemon] prompt done event=${event.id} send_count=${context.sendCount || 0}`);
-    if (!context.sendCount) console.error(`[daemon] reply not sent event=${event.id} reason=agent_cli_not_called`);
+    if (!context.sendCount)
+      console.error(`[daemon] reply not sent event=${event.id} reason=agent_cli_not_called`);
     await this.addReaction(event, COMPLETION_REACTION, 'completion');
   }
 
@@ -148,9 +178,13 @@ export class PersonalDaemon {
     try {
       const usage = await this.runner.getContextUsage();
       recordContextUsage(this.config, usage, eventId);
-      console.error(`[daemon] context usage event=${eventId} value=${JSON.stringify(usage.text)} source=${usage.source}`);
+      console.error(
+        `[daemon] context usage event=${eventId} value=${JSON.stringify(usage.text)} source=${usage.source}`,
+      );
     } catch (error) {
-      console.error(`[daemon] context usage warning event=${eventId}: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `[daemon] context usage warning event=${eventId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -160,9 +194,13 @@ export class PersonalDaemon {
     for (const messageId of messageIds) {
       try {
         await this.channel.sender.addReaction(messageId, emojiType);
-        console.error(`[daemon] reaction ok event=${event.id} message=${messageId} emoji=${emojiType} phase=${phase}`);
+        console.error(
+          `[daemon] reaction ok event=${event.id} message=${messageId} emoji=${emojiType} phase=${phase}`,
+        );
       } catch (error) {
-        console.error(`[daemon] reaction warning event=${event.id} message=${messageId} emoji=${emojiType} phase=${phase}: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(
+          `[daemon] reaction warning event=${event.id} message=${messageId} emoji=${emojiType} phase=${phase}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
   }
@@ -188,14 +226,22 @@ export class PersonalDaemon {
           await this.handleEvent(noticeToInbound(notice));
           acknowledgeParentNotification(this.config, notice.id);
         } catch (error) {
-          try { releaseParentNotification(this.config, notice.id); }
-          catch (releaseError) { console.error(`[session-callback] release failed: ${releaseError}`); }
-          console.error(`[daemon] ${error instanceof Error ? error.stack || error.message : error}`);
+          try {
+            releaseParentNotification(this.config, notice.id);
+          } catch (releaseError) {
+            console.error(`[session-callback] release failed: ${releaseError}`);
+          }
+          console.error(
+            `[daemon] ${error instanceof Error ? error.stack || error.message : error}`,
+          );
         }
       }
     });
-    this.queue = task.catch(error => console.error(`[session-callback] ${error}`))
-      .finally(() => { this.callbackDeliveryScheduled = false; });
+    this.queue = task
+      .catch((error) => console.error(`[session-callback] ${error}`))
+      .finally(() => {
+        this.callbackDeliveryScheduled = false;
+      });
   }
 
   private dedupeKey(event: InboundEvent): string | null {
@@ -239,7 +285,9 @@ export class PersonalDaemon {
 
 function reactionMessageIds(event: InboundEvent): string[] {
   const rawEvents = Array.isArray(event.raw) ? event.raw.filter(isInboundEvent) : [event];
-  return Array.from(new Set(rawEvents.map(item => item.messageId).filter((id): id is string => !!id)));
+  return Array.from(
+    new Set(rawEvents.map((item) => item.messageId).filter((id): id is string => !!id)),
+  );
 }
 
 function isInboundEvent(value: unknown): value is InboundEvent {
@@ -252,16 +300,19 @@ function aggregateInboundMessages(events: InboundEvent[]): InboundEvent {
   const last = events[events.length - 1];
   const lines = [
     `Aggregated ${events.length} inbound messages in receive order.`,
-    ...events.flatMap((event, index) => [
-      '',
-      `Message ${index + 1}:`,
-      `source=${event.source}`,
-      `event_id=${event.id}`,
-      `chat_id=${event.chatId}`,
-      event.messageId ? `message_id=${event.messageId}` : undefined,
-      event.userId ? `user_id=${event.userId}` : undefined,
-      event.text,
-    ].filter(Boolean) as string[]),
+    ...events.flatMap(
+      (event, index) =>
+        [
+          '',
+          `Message ${index + 1}:`,
+          `source=${event.source}`,
+          `event_id=${event.id}`,
+          `chat_id=${event.chatId}`,
+          event.messageId ? `message_id=${event.messageId}` : undefined,
+          event.userId ? `user_id=${event.userId}` : undefined,
+          event.text,
+        ].filter(Boolean) as string[],
+    ),
   ];
   return {
     ...last,

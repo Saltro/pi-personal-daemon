@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import { loadConfig } from '../config.js';
 import { detectParentCallback } from '../core/sessions/callbacks.js';
 import { runSessionPrompt, selectSessionAgent } from '../core/sessions/service.js';
+
 export { runSessionPrompt } from '../core/sessions/service.js';
+
 import {
   getSession,
+  insertSession,
   loadRegistry,
   makeSessionId,
   newSessionRecord,
-  insertSession,
   refreshSessionStatus,
 } from '../core/sessions/registry.js';
 import type { AppConfig } from '../types.js';
@@ -66,11 +68,15 @@ function needValue(args: string[], index: number, flag: string): string {
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  for await (const chunk of process.stdin)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function promptFromOptions(opts: ParsedOptions, key: 'prompt' | 'message'): Promise<string | undefined> {
+async function promptFromOptions(
+  opts: ParsedOptions,
+  key: 'prompt' | 'message',
+): Promise<string | undefined> {
   let text = opts[key];
   if (opts.stdin) text = await readStdin();
   text = text?.trim();
@@ -85,8 +91,7 @@ export async function runSessionsCli(args: string[]): Promise<void> {
   else if (command === 'list') {
     if (rest.length) usage();
     listSessions(config);
-  }
-  else if (command === 'status') statusSession(config, parseOptions(rest));
+  } else if (command === 'status') statusSession(config, parseOptions(rest));
   else if (command === 'history') historySession(config, parseOptions(rest));
   else usage();
 }
@@ -113,7 +118,10 @@ async function createSession(config: AppConfig, opts: ParsedOptions): Promise<vo
 async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void> {
   const id = opts.positionals[0];
   if (!id) usage();
-  if (opts.agent) throw new Error('--agent is only supported by sessions create; a session backend cannot be changed');
+  if (opts.agent)
+    throw new Error(
+      '--agent is only supported by sessions create; a session backend cannot be changed',
+    );
   const prompt = await promptFromOptions(opts, 'message');
   if (!prompt) throw new Error('sessions send requires --message or --stdin');
   let record = getSession(config, id);
@@ -124,9 +132,13 @@ async function sendSession(config: AppConfig, opts: ParsedOptions): Promise<void
 }
 
 function listSessions(config: AppConfig): void {
-  const sessions = Object.values(loadRegistry(config).sessions).map(record => refreshSessionStatus(config, record)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const sessions = Object.values(loadRegistry(config).sessions)
+    .map((record) => refreshSessionStatus(config, record))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const record of sessions) {
-    console.log(`${record.id}\t${record.status}\t${record.autoReturn}\t${record.updatedAt}\t${record.name || ''}`);
+    console.log(
+      `${record.id}\t${record.status}\t${record.autoReturn}\t${record.updatedAt}\t${record.name || ''}`,
+    );
   }
 }
 

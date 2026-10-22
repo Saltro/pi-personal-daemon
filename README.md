@@ -126,7 +126,6 @@ The legacy `agent` config is the default profile. Add named profiles for session
 ```
 
 Built-in backends:
-
 - **`pi`**: main session uses persistent JSON-lines RPC; child prompts use Pi's print execution. Supports steer, native message access, and context usage. Child `--wait` awaits the supervised execution outcome; it does not change the backend protocol.
 - **`process`**: runs an external harness command for each prompt, plain-text stdin by default. `promptMode=argument` expands `{prompt}` / `{sessionId}` templates, appending the prompt if no `{prompt}` template exists. This is not Pi RPC; steer/native history/context usage are explicitly unavailable. The external harness owns any persistent history and can use the session ID supplied by the adapter. Optional `timeoutMs` applies to main and child runs (positive milliseconds, at most 2,147,483,647); main defaults to ten minutes when omitted, while child runs have no execution deadline unless configured.
 - **`mock`**: local deterministic results for testing.
@@ -191,7 +190,6 @@ Mutable daemon state lives in `runtime.stateDir/state.sqlite`, defaulting to `~/
 `runtime.contextFile` only selects the legacy context import location; it does not change the state directory. Without `stateDir`, state lives in `~/.cache/retriever`, so sessions, crons, binding, and callbacks share one root. Tests and isolated clients must set an explicit temporary `stateDir`. `contextFile` is not an actively rewritten JSON projection.
 
 First database access imports existing daemon JSON state transactionally and once:
-
 - `sessions/registry.json`
 - `cron/registry.json`
 - `feishu-chat-binding.json`
@@ -211,7 +209,11 @@ Config wakeups accept an interval or standard five-field cron subset:
   "scheduler": {
     "enabled": true,
     "wakeups": [
-      { "id": "hourly", "intervalMs": 3600000, "prompt": "Inspect context and decide whether to send." },
+      {
+        "id": "hourly",
+        "intervalMs": 3600000,
+        "prompt": "Inspect context and decide whether to send."
+      },
       { "id": "morning", "cron": "30 9 * * *", "prompt": "Morning review." }
     ]
   }

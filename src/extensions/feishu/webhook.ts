@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import http, { type IncomingMessage, type Server } from 'node:http';
-import { normalizeFeishuInbound } from './normalize.js';
 import type { AppConfig, InboundEvent } from '../../types.js';
+import { normalizeFeishuInbound } from './normalize.js';
 
 interface FeishuCallbackPayload {
   type?: string;
@@ -12,7 +12,10 @@ interface FeishuCallbackPayload {
   encrypt?: string;
 }
 
-export function startHttpReceiver(config: AppConfig, onEvent: (event: InboundEvent) => Promise<void>): Server | null {
+export function startHttpReceiver(
+  config: AppConfig,
+  onEvent: (event: InboundEvent) => Promise<void>,
+): Server | null {
   if (!config.http.enabled) return null;
   const server = http.createServer(async (req, res) => {
     const requestPath = new URL(req.url || '/', `http://${req.headers.host}`).pathname;
@@ -29,18 +32,22 @@ export function startHttpReceiver(config: AppConfig, onEvent: (event: InboundEve
         return;
       }
       if (payload.type === 'url_verification' && payload.challenge) {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ challenge: payload.challenge }));
+        res
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ challenge: payload.challenge }));
         return;
       }
       const event = normalizeFeishuInbound(payload, 'http-feishu');
-      onEvent(event).catch(error => console.error(`[http-receiver] ${error.stack || error}`));
+      onEvent(event).catch((error) => console.error(`[http-receiver] ${error.stack || error}`));
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true }));
     } catch (error) {
       res.writeHead(400).end(error instanceof Error ? error.message : String(error));
     }
   });
   server.listen(config.http.port, config.http.host, () => {
-    console.error(`[http-receiver] listening http://${config.http.host}:${config.http.port}${config.http.path}`);
+    console.error(
+      `[http-receiver] listening http://${config.http.host}:${config.http.port}${config.http.path}`,
+    );
   });
   return server;
 }
@@ -48,7 +55,8 @@ export function startHttpReceiver(config: AppConfig, onEvent: (event: InboundEve
 export function parseFeishuPayload(body: string, config: AppConfig): FeishuCallbackPayload {
   const payload = (body ? JSON.parse(body) : {}) as FeishuCallbackPayload;
   if (!payload.encrypt) return payload;
-  if (!config.feishu.encryptKey) throw new Error('encrypted Feishu callback received but FEISHU_ENCRYPT_KEY is not configured');
+  if (!config.feishu.encryptKey)
+    throw new Error('encrypted Feishu callback received but FEISHU_ENCRYPT_KEY is not configured');
   return decryptFeishuPayload(payload.encrypt, config.feishu.encryptKey) as FeishuCallbackPayload;
 }
 
@@ -73,7 +81,7 @@ function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
     req.setEncoding('utf8');
-    req.on('data', chunk => {
+    req.on('data', (chunk) => {
       body += chunk;
       if (body.length > 1024 * 1024) {
         reject(new Error('body too large'));

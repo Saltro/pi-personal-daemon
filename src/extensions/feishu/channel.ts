@@ -2,8 +2,8 @@ import type { ChannelAdapter } from '../../core/channels/registry.js';
 import { ensureFeishuChatBinding, readFeishuChatBinding } from '../../core/state/binding.js';
 import type { AppConfig, InboundEvent, Sender } from '../../types.js';
 import { createSender } from './sender.js';
-import { startFeishuWsReceiver } from './ws.js';
 import { startHttpReceiver } from './webhook.js';
+import { startFeishuWsReceiver } from './ws.js';
 
 export class FeishuChannel implements ChannelAdapter {
   readonly type = 'feishu';
@@ -34,7 +34,13 @@ export class FeishuChannel implements ChannelAdapter {
   }
 
   bindInbound(event: InboundEvent): void {
-    if (event.kind !== 'message' || !event.messageId || !event.chatId || !event.source.includes('feishu')) return;
+    if (
+      event.kind !== 'message' ||
+      !event.messageId ||
+      !event.chatId ||
+      !event.source.includes('feishu')
+    )
+      return;
     if (readFeishuChatBinding(this.config)) return;
     ensureFeishuChatBinding(this.config, event.chatId, 'auto');
     console.error(`[channel] feishu chat bound chat=${event.chatId}`);
@@ -46,6 +52,10 @@ export class FeishuChannel implements ChannelAdapter {
 
   dedupeKey(event: InboundEvent): string | null {
     if (event.kind !== 'message') return null;
-    return event.messageId ? `message:${event.messageId}` : event.source.includes('feishu') ? `event:${event.id}` : null;
+    return event.messageId
+      ? `message:${event.messageId}`
+      : event.source.includes('feishu')
+        ? `event:${event.id}`
+        : null;
   }
 }

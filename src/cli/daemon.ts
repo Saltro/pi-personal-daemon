@@ -1,7 +1,14 @@
-import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { loadConfig } from '../config.js';
-import { daemonLogPath, daemonStatus, removeDaemonPid, stopDaemon, waitForDaemonStart, type DaemonStatus } from '../core/daemon/lifecycle.js';
+import {
+  type DaemonStatus,
+  daemonLogPath,
+  daemonStatus,
+  removeDaemonPid,
+  stopDaemon,
+  waitForDaemonStart,
+} from '../core/daemon/lifecycle.js';
 import { selfCommand } from '../core/runtime/process-paths.js';
 import { stateDir } from '../core/state/paths.js';
 import type { AppConfig } from '../types.js';

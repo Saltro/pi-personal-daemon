@@ -1,7 +1,15 @@
-import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
+import {
+  type ChildProcessWithoutNullStreams,
+  type SpawnOptionsWithoutStdio,
+  spawn,
+} from 'node:child_process';
 import readline from 'node:readline';
+import {
+  agentProcessDetached,
+  signalAgentProcess,
+  waitForAgentProcessExit,
+} from '../../core/runtime/process-control.js';
 import { agentProcessEnv } from '../../core/runtime/process-paths.js';
-import { agentProcessDetached, signalAgentProcess, waitForAgentProcessExit } from '../../core/runtime/process-control.js';
 import type { AgentConfig, AppConfig } from '../../types.js';
 
 interface RpcResponse<T = unknown> {
@@ -30,7 +38,11 @@ interface PendingCommand {
 export interface PiRpcRunnerOptions {
   commandTimeoutMs?: number;
   settledTimeoutMs?: number;
-  spawn?: (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
+  spawn?: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptionsWithoutStdio,
+  ) => ChildProcessWithoutNullStreams;
   signalProcess?: (child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) => boolean;
   confirmExit?: (child: ChildProcessWithoutNullStreams) => boolean | Promise<boolean>;
 }
@@ -76,7 +88,10 @@ export class PiRpcRunner {
   private signalProcess: NonNullable<PiRpcRunnerOptions['signalProcess']>;
   private confirmExit: NonNullable<PiRpcRunnerOptions['confirmExit']>;
 
-  constructor(private appConfig: AppConfig, options: PiRpcRunnerOptions = {}) {
+  constructor(
+    private appConfig: AppConfig,
+    options: PiRpcRunnerOptions = {},
+  ) {
     this.config = appConfig.agent;
     this.commandTimeoutMs = options.commandTimeoutMs ?? 30_000;
     this.settledTimeoutMs = options.settledTimeoutMs ?? 10 * 60 * 1000;
@@ -90,8 +105,10 @@ export class PiRpcRunner {
     if (this.proc?.error) throw new Error('pi rpc process is stopping');
     if (this.proc) return;
     const args = [
-      '--mode', 'rpc',
-      '--session-id', this.config.sessionId,
+      '--mode',
+      'rpc',
+      '--session-id',
+      this.config.sessionId,
       ...(this.config.sessionDir ? ['--session-dir', this.config.sessionDir] : []),
       ...(this.config.extraArgs || []),
     ];
@@ -103,23 +120,34 @@ export class PiRpcRunner {
     });
     const reader = readline.createInterface({ input: child.stdout });
     const proc: RpcProcess = {
-      child, reader, pending: new Map(), waiters: new Set(), lastAssistantText: '', running: false, error: null,
-      terminationSignaled: false, verifyingExit: false,
+      child,
+      reader,
+      pending: new Map(),
+      waiters: new Set(),
+      lastAssistantText: '',
+      running: false,
+      error: null,
+      terminationSignaled: false,
+      verifyingExit: false,
     };
     this.proc = proc;
     this.lastProcessError = null;
-    child.stderr.on('data', chunk => {
+    child.stderr.on('data', (chunk) => {
       if (this.proc === proc && !proc.error) process.stderr.write(`[pi] ${chunk}`);
     });
-    child.on('error', error => this.finishProcess(proc, error));
-    child.on('exit', (code, signal) => this.finishProcess(proc, new Error(`pi rpc exited code=${code} signal=${signal}`)));
-    child.on('close', (code, signal) => this.finishProcess(proc, new Error(`pi rpc closed code=${code} signal=${signal}`), true));
-    child.stdin.on('error', error => this.finishProcess(proc, error));
+    child.on('error', (error) => this.finishProcess(proc, error));
+    child.on('exit', (code, signal) =>
+      this.finishProcess(proc, new Error(`pi rpc exited code=${code} signal=${signal}`)),
+    );
+    child.on('close', (code, signal) =>
+      this.finishProcess(proc, new Error(`pi rpc closed code=${code} signal=${signal}`), true),
+    );
+    child.stdin.on('error', (error) => this.finishProcess(proc, error));
     child.stdin.on('close', () => this.finishProcess(proc, new Error('pi rpc stdin closed')));
-    child.stdout.on('error', error => this.finishProcess(proc, error));
-    child.stderr.on('error', error => this.finishProcess(proc, error));
-    reader.on('line', line => this.handleRecordLine(proc, line));
-    reader.on('error', error => this.finishProcess(proc, error));
+    child.stdout.on('error', (error) => this.finishProcess(proc, error));
+    child.stderr.on('error', (error) => this.finishProcess(proc, error));
+    reader.on('line', (line) => this.handleRecordLine(proc, line));
+    reader.on('error', (error) => this.finishProcess(proc, error));
   }
 
   private finishProcess(proc: RpcProcess, error: Error, closed = false): void {
@@ -141,12 +169,20 @@ export class PiRpcRunner {
       // A leader exit can leave descendants executing, even without RPC pipes.
       // Signal the owned group; close and verified group exit gate replacement.
       try {
-        proc.terminationSignaled = proc.child.pid == null || this.signalProcess(proc.child, 'SIGKILL');
+        proc.terminationSignaled =
+          proc.child.pid == null || this.signalProcess(proc.child, 'SIGKILL');
       } catch (killError) {
-        console.error(`[pi-rpc] failed to terminate: ${killError instanceof Error ? killError.message : String(killError)}`);
+        console.error(
+          `[pi-rpc] failed to terminate: ${killError instanceof Error ? killError.message : String(killError)}`,
+        );
       }
     }
-    if ((closed || proc.child.pid == null) && proc.terminationSignaled && !proc.verifyingExit && this.proc === proc) {
+    if (
+      (closed || proc.child.pid == null) &&
+      proc.terminationSignaled &&
+      !proc.verifyingExit &&
+      this.proc === proc
+    ) {
       proc.verifyingExit = true;
       const release = (exited: boolean) => {
         if (exited && this.proc === proc) this.proc = null;
@@ -154,9 +190,18 @@ export class PiRpcRunner {
       try {
         const exited = proc.child.pid == null || this.confirmExit(proc.child);
         if (typeof exited === 'boolean') release(exited);
-        else exited.then(release).catch(error => console.error(`[pi-rpc] failed to confirm exit: ${error instanceof Error ? error.message : String(error)}`));
+        else
+          exited
+            .then(release)
+            .catch((error) =>
+              console.error(
+                `[pi-rpc] failed to confirm exit: ${error instanceof Error ? error.message : String(error)}`,
+              ),
+            );
       } catch (error) {
-        console.error(`[pi-rpc] failed to confirm exit: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(
+          `[pi-rpc] failed to confirm exit: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
   }
@@ -176,13 +221,19 @@ export class PiRpcRunner {
       return;
     }
 
-    if (record.type === 'response' && typeof record.id === 'string' && proc.pending.has(record.id)) {
+    if (
+      record.type === 'response' &&
+      typeof record.id === 'string' &&
+      proc.pending.has(record.id)
+    ) {
       const response = record as unknown as RpcResponse;
       const pending = proc.pending.get(record.id);
       if (!pending) return;
       proc.pending.delete(record.id);
       clearTimeout(pending.timer);
-      response.success ? pending.resolve(response.data) : pending.reject(new Error(response.error || `${response.command} failed`));
+      response.success
+        ? pending.resolve(response.data)
+        : pending.reject(new Error(response.error || `${response.command} failed`));
     }
 
     if (record.type === 'message_update') {
@@ -209,18 +260,23 @@ export class PiRpcRunner {
     return this.commandForProcess<T>(this.proc, type, fields);
   }
 
-  private commandForProcess<T>(proc: RpcProcess, type: string, fields: Record<string, unknown> = {}): Promise<T> {
+  private commandForProcess<T>(
+    proc: RpcProcess,
+    type: string,
+    fields: Record<string, unknown> = {},
+  ): Promise<T> {
     this.assertProcess(proc);
     const id = `cmd-${this.nextId++}`;
-    const record = JSON.stringify({ ...fields, id, type }) + '\n';
+    const record = `${JSON.stringify({ ...fields, id, type })}\n`;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.finishProcess(proc, new Error(`timed out waiting for pi rpc ${type} response`));
       }, this.commandTimeoutMs);
       proc.pending.set(id, { resolve: resolve as (data: unknown) => void, reject, timer });
       try {
-        if (!proc.child.stdin.writable || proc.child.stdin.destroyed) throw new Error('pi rpc stdin is not writable');
-        proc.child.stdin.write(record, error => {
+        if (!proc.child.stdin.writable || proc.child.stdin.destroyed)
+          throw new Error('pi rpc stdin is not writable');
+        proc.child.stdin.write(record, (error) => {
           if (error) this.finishProcess(proc, error);
         });
       } catch (error) {
@@ -253,18 +309,25 @@ export class PiRpcRunner {
     }
     if (response?.disposition === 'handled') {
       this.settleProcess(proc);
-      const last = await this.commandForProcess<LastAssistantTextResponse>(proc, 'get_last_assistant_text');
+      const last = await this.commandForProcess<LastAssistantTextResponse>(
+        proc,
+        'get_last_assistant_text',
+      );
       return last.text ?? '';
     }
     await this.waitForProcessSettled(proc, this.settledTimeoutMs);
     this.assertProcess(proc);
-    const last = await this.commandForProcess<LastAssistantTextResponse>(proc, 'get_last_assistant_text').catch(() => ({ text: proc.lastAssistantText }));
+    const last = await this.commandForProcess<LastAssistantTextResponse>(
+      proc,
+      'get_last_assistant_text',
+    ).catch(() => ({ text: proc.lastAssistantText }));
     return last.text ?? proc.lastAssistantText;
   }
 
   waitForSettled(timeoutMs = this.settledTimeoutMs): Promise<void> {
     const proc = this.proc;
-    if (!proc) return this.lastProcessError ? Promise.reject(this.lastProcessError) : Promise.resolve();
+    if (!proc)
+      return this.lastProcessError ? Promise.reject(this.lastProcessError) : Promise.resolve();
     return this.waitForProcessSettled(proc, timeoutMs);
   }
 
@@ -307,7 +370,12 @@ export class PiRpcRunner {
     if (type === 'get_state') {
       return {
         sessionId: this.config.sessionId,
-        model: { id: 'mock-model', contextWindow: 1000000, maxTokens: 16384, input: ['text', 'image'] },
+        model: {
+          id: 'mock-model',
+          contextWindow: 1000000,
+          maxTokens: 16384,
+          input: ['text', 'image'],
+        },
         isStreaming: false,
         isCompacting: false,
         messageCount: 2,
@@ -330,7 +398,11 @@ export class PiRpcRunner {
   }
 }
 
-export function extractContextUsage(state: unknown, messages: unknown, _sessionId: string): PiContextUsage {
+export function extractContextUsage(
+  state: unknown,
+  messages: unknown,
+  _sessionId: string,
+): PiContextUsage {
   const stateUsage = findContextUsagePair(state);
   if (stateUsage) return formatUsage(stateUsage);
 
@@ -341,7 +413,10 @@ export function extractContextUsage(state: unknown, messages: unknown, _sessionI
 }
 
 function formatUsage(candidate: UsageCandidate): PiContextUsage {
-  return { text: `Context ${formatOccupancyPercent(candidate.used, candidate.limit)}`, source: candidate.source };
+  return {
+    text: `Context ${formatOccupancyPercent(candidate.used, candidate.limit)}`,
+    source: candidate.source,
+  };
 }
 
 function findContextUsagePair(value: unknown, path = ''): UsageCandidate | null {
@@ -366,15 +441,25 @@ function findContextUsagePair(value: unknown, path = ''): UsageCandidate | null 
   return null;
 }
 
-function findLatestMessageUsage(messagesPayload: unknown, contextLimit: number | undefined): UsageCandidate | null {
+function findLatestMessageUsage(
+  messagesPayload: unknown,
+  contextLimit: number | undefined,
+): UsageCandidate | null {
   if (!contextLimit || contextLimit <= 0) return null;
-  const messages = isRecord(messagesPayload) && Array.isArray(messagesPayload.messages) ? messagesPayload.messages : [];
+  const messages =
+    isRecord(messagesPayload) && Array.isArray(messagesPayload.messages)
+      ? messagesPayload.messages
+      : [];
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
     if (!isRecord(message) || !isRecord(message.usage)) continue;
     const used = usedTokensFromMessageUsage(message.usage);
     if (used !== undefined && validPair(used, contextLimit)) {
-      return { used, limit: contextLimit, source: 'pi-rpc get_messages latest assistant usage and model contextWindow' };
+      return {
+        used,
+        limit: contextLimit,
+        source: 'pi-rpc get_messages latest assistant usage and model contextWindow',
+      };
     }
   }
   return null;
@@ -384,7 +469,10 @@ function usedTokensFromMessageUsage(usage: Record<string, unknown>): number | un
   const contextTokens = semanticNumberFrom(usage, /^(contextTokens|context_tokens)$/i);
   if (contextTokens !== undefined) return contextTokens;
 
-  const promptTokens = semanticNumberFrom(usage, /^(promptTokens|inputTokens|prompt_tokens|input_tokens)$/i);
+  const promptTokens = semanticNumberFrom(
+    usage,
+    /^(promptTokens|inputTokens|prompt_tokens|input_tokens)$/i,
+  );
   if (promptTokens !== undefined) return promptTokens;
 
   const promptParts = [
@@ -408,7 +496,10 @@ function findContextLimit(value: unknown): number | undefined {
   return undefined;
 }
 
-function semanticNumberFrom(object: Record<string, unknown>, keyPattern: RegExp): number | undefined {
+function semanticNumberFrom(
+  object: Record<string, unknown>,
+  keyPattern: RegExp,
+): number | undefined {
   for (const [key, value] of Object.entries(object)) {
     if (!keyPattern.test(key)) continue;
     const number = numericScalar(value);
@@ -437,6 +528,9 @@ function formatOccupancyPercent(used: number, limit: number): string {
   return `${Math.round(percent)}%`;
 }
 
-const CONTEXT_USED_KEYS = /^(usedTokens|usedContextTokens|contextUsedTokens|contextTokens|currentTokens|currentContextTokens|promptTokens|inputTokens|used_tokens|used_context_tokens|context_used_tokens|context_tokens|current_tokens|prompt_tokens|input_tokens|tokensUsed|tokens_used)$/i;
-const CONTEXT_LIMIT_KEYS = /^(contextWindow|contextLimit|maxContextTokens|maxContextWindow|tokenLimit|context_window|context_limit|max_context_tokens|max_context_window|token_limit|windowTokens|window_tokens|limitTokens|limit_tokens)$/i;
-const CONTEXT_PERCENT_KEYS = /^(contextPercent|contextPercentage|contextUsagePercent|contextUsagePercentage|contextRatio|context_percent|context_percentage|context_usage_percent|context_usage_percentage|context_ratio)$/i;
+const CONTEXT_USED_KEYS =
+  /^(usedTokens|usedContextTokens|contextUsedTokens|contextTokens|currentTokens|currentContextTokens|promptTokens|inputTokens|used_tokens|used_context_tokens|context_used_tokens|context_tokens|current_tokens|prompt_tokens|input_tokens|tokensUsed|tokens_used)$/i;
+const CONTEXT_LIMIT_KEYS =
+  /^(contextWindow|contextLimit|maxContextTokens|maxContextWindow|tokenLimit|context_window|context_limit|max_context_tokens|max_context_window|token_limit|windowTokens|window_tokens|limitTokens|limit_tokens)$/i;
+const CONTEXT_PERCENT_KEYS =
+  /^(contextPercent|contextPercentage|contextUsagePercent|contextUsagePercentage|contextRatio|context_percent|context_percentage|context_usage_percent|context_usage_percentage|context_ratio)$/i;

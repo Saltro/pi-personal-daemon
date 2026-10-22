@@ -1,6 +1,6 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
-import { normalizeFeishuInbound } from './normalize.js';
 import type { AppConfig, InboundEvent } from '../../types.js';
+import { normalizeFeishuInbound } from './normalize.js';
 
 interface StoppableWsClient {
   close(params?: { force?: boolean }): void;
@@ -24,7 +24,7 @@ export async function startFeishuWsReceiver(
     'im.message.receive_v1': (data: unknown) => {
       const event = normalizeFeishuInbound(data, 'feishu-ws');
       setImmediate(() => {
-        onEvent(event).catch(error => console.error(`[feishu-ws] ${error.stack || error}`));
+        onEvent(event).catch((error) => console.error(`[feishu-ws] ${error.stack || error}`));
       });
     },
   });
@@ -34,7 +34,10 @@ export async function startFeishuWsReceiver(
     appSecret: config.feishu.appSecret,
     loggerLevel: Lark.LoggerLevel.info,
     onReady: () => console.error('[feishu-ws] ready'),
-    onError: error => console.error(`[feishu-ws] ${error instanceof Error ? error.stack || error.message : String(error)}`),
+    onError: (error) =>
+      console.error(
+        `[feishu-ws] ${error instanceof Error ? error.stack || error.message : String(error)}`,
+      ),
     onReconnecting: () => console.error('[feishu-ws] reconnecting'),
     onReconnected: () => console.error('[feishu-ws] reconnected'),
   });

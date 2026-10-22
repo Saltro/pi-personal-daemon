@@ -9,7 +9,8 @@ export function returnUsage(command = 'retriever return'): never {
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  for await (const chunk of process.stdin)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   return Buffer.concat(chunks).toString('utf8');
 }
 
@@ -28,8 +29,16 @@ export async function runReturnCli(args: string[], command = 'retriever return')
 
   const config = loadConfig();
   const parent = findParentCallback(config);
-  if (!parent) throw new Error('parent callback metadata not found; create or send the child from a parent agent session, or run from a cron target session; --return only controls automatic completion notices');
-  const file = writeParentReturnNotification(config, parent, text, process.env.RETRIEVER_SESSION_ID || process.env.PI_SESSION_ID);
+  if (!parent)
+    throw new Error(
+      'parent callback metadata not found; create or send the child from a parent agent session, or run from a cron target session; --return only controls automatic completion notices',
+    );
+  const file = writeParentReturnNotification(
+    config,
+    parent,
+    text,
+    process.env.RETRIEVER_SESSION_ID || process.env.PI_SESSION_ID,
+  );
   console.error(`[${command}] queued parent return ${file}`);
 }
 
